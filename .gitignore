@@ -1,0 +1,45 @@
+# Standard gitignore rules for tsilva organization
+# Used by scripts/sync-gitignore.sh
+
+# Claude Code
+.claude/*.local.json
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
+.secrets/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node.js
+node_modules/
+
+# Build artifacts
+dist/
+build/
+
+# Logs
+logs/
+*.log

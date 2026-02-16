@@ -199,11 +199,12 @@ app.post("/sessions/:id/focus", async (c) => {
 
 // Launch Cursor for a repo
 app.post("/launch", async (c) => {
-  const body = await c.req.json<{ path: string }>();
-  if (!body.path) return c.json({ error: "path required" }, 400);
+  const body = await c.req.parseBody();
+  const path = typeof body.path === "string" ? body.path : "";
+  if (!path) return c.json({ error: "path required" }, 400);
 
   try {
-    Bun.spawn(["cursor", body.path]);
+    Bun.spawn(["cursor", path]);
     return c.json({ ok: true });
   } catch {
     return c.json({ error: "launch failed" }, 500);

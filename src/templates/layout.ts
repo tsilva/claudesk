@@ -1,0 +1,52 @@
+import type { Session, LaunchableRepo, ParsedMessage } from "../sessions.ts";
+import { renderSidebar } from "./sidebar.ts";
+import { renderSessionDetail, renderEmptyDetail } from "./session-detail.ts";
+
+export function renderLayout(
+  sessions: Session[],
+  repos: LaunchableRepo[],
+  activeSession: Session | null,
+  messages: ParsedMessage[] = []
+): string {
+  const sidebarHtml = renderSidebar(sessions, repos, activeSession?.id);
+  const detailHtml = activeSession
+    ? renderSessionDetail(activeSession, messages)
+    : renderEmptyDetail();
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>claudesk</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/htmx-sse.js"></script>
+</head>
+<body>
+  <div class="app" hx-ext="sse" sse-connect="/events${activeSession ? `?session=${activeSession.id}` : ""}">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">claudesk</span>
+      </div>
+      <div class="header-right">
+        <span class="connection-dot" id="connection-dot" title="SSE Connected"></span>
+        <button class="btn btn--ghost" id="notif-toggle" onclick="toggleNotifications()">
+          Notifications: <span id="notif-status">Off</span>
+        </button>
+      </div>
+    </header>
+    <div class="main">
+      <aside class="sidebar" id="sidebar" sse-swap="sidebar" hx-swap="innerHTML">
+        ${sidebarHtml}
+      </aside>
+      <div class="content" id="session-detail">
+        ${detailHtml}
+      </div>
+    </div>
+  </div>
+  <div id="notification-banner" class="notification-banner hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>`;
+}

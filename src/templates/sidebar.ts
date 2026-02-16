@@ -70,7 +70,7 @@ export function renderSidebar(
     html += `<div class="launch-section">
       <div class="launch-section-header">Launch</div>`;
 
-    for (const repo of repos.slice(0, 20)) {
+    for (const repo of repos) {
       html += `<div class="launch-item-wrapper">
         <button class="launch-item" onclick="toggleLaunchPrompt(this)">
           <span>${escapeHtml(repo.name)}</span>

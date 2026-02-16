@@ -156,9 +156,10 @@
   }
 
   // --- Launch Form State Preservation ---
+  // State is saved proactively on input/focus because htmx:sseMessage fires
+  // AFTER the swap (htmx-sse.js line 138-139: swap() then triggerEvent).
 
   function saveLaunchFormState() {
-    savedLaunchFormState = null;
     var form = document.querySelector(".launch-prompt-form:not(.hidden)");
     if (!form) return;
     var pathInput = form.querySelector('input[name="path"]');
@@ -167,14 +168,13 @@
     savedLaunchFormState = {
       path: pathInput.value,
       prompt: promptInput ? promptInput.value : "",
-      hadFocus: document.activeElement === promptInput,
+      hadFocus: promptInput && document.activeElement === promptInput,
     };
   }
 
   function restoreLaunchFormState() {
     if (!savedLaunchFormState) return;
     var state = savedLaunchFormState;
-    savedLaunchFormState = null;
     var forms = document.querySelectorAll(".launch-prompt-form");
     for (var i = 0; i < forms.length; i++) {
       var pathInput = forms[i].querySelector('input[name="path"]');
@@ -193,6 +193,23 @@
     }
   }
 
+  // Save on every keystroke and focus into launch prompt inputs
+  document.addEventListener("input", function (e) {
+    if (e.target && e.target.classList.contains("launch-prompt-input")) {
+      saveLaunchFormState();
+    }
+  });
+  document.addEventListener("focusin", function (e) {
+    if (e.target && e.target.classList.contains("launch-prompt-input")) {
+      saveLaunchFormState();
+    }
+  });
+
+  // Also save right before SSE swap via htmx:sseBeforeMessage (fires before swap)
+  document.body.addEventListener("htmx:sseBeforeMessage", function () {
+    saveLaunchFormState();
+  });
+
   // --- SSE sidebar active-class logic ---
 
   document.body.addEventListener("htmx:sseMessage", function (e) {
@@ -200,7 +217,6 @@
 
     // Re-apply active class, filter, and launch form after sidebar SSE re-render
     if (type === "sidebar") {
-      saveLaunchFormState();
       requestAnimationFrame(function () {
         var sidebar = document.getElementById("sidebar");
         if (!sidebar) return;
@@ -315,6 +331,9 @@
     form.classList.toggle("hidden");
     if (!form.classList.contains("hidden")) {
       form.querySelector(".launch-prompt-input").focus();
+      saveLaunchFormState();
+    } else {
+      savedLaunchFormState = null;
     }
   };
 

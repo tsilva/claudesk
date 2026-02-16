@@ -5,6 +5,7 @@
   // --- State ---
   let notificationsEnabled = false;
   let currentSessionId = null;
+  var savedLaunchFormState = null;
 
   // --- Notifications ---
 
@@ -154,13 +155,52 @@
     }
   }
 
+  // --- Launch Form State Preservation ---
+
+  function saveLaunchFormState() {
+    savedLaunchFormState = null;
+    var form = document.querySelector(".launch-prompt-form:not(.hidden)");
+    if (!form) return;
+    var pathInput = form.querySelector('input[name="path"]');
+    var promptInput = form.querySelector(".launch-prompt-input");
+    if (!pathInput) return;
+    savedLaunchFormState = {
+      path: pathInput.value,
+      prompt: promptInput ? promptInput.value : "",
+      hadFocus: document.activeElement === promptInput,
+    };
+  }
+
+  function restoreLaunchFormState() {
+    if (!savedLaunchFormState) return;
+    var state = savedLaunchFormState;
+    savedLaunchFormState = null;
+    var forms = document.querySelectorAll(".launch-prompt-form");
+    for (var i = 0; i < forms.length; i++) {
+      var pathInput = forms[i].querySelector('input[name="path"]');
+      if (pathInput && pathInput.value === state.path) {
+        forms[i].classList.remove("hidden");
+        var promptInput = forms[i].querySelector(".launch-prompt-input");
+        if (promptInput) {
+          promptInput.value = state.prompt;
+          if (state.hadFocus) {
+            promptInput.focus();
+            promptInput.setSelectionRange(state.prompt.length, state.prompt.length);
+          }
+        }
+        return;
+      }
+    }
+  }
+
   // --- SSE sidebar active-class logic ---
 
   document.body.addEventListener("htmx:sseMessage", function (e) {
     var type = e.detail.type;
 
-    // Re-apply active class and filter after sidebar SSE re-render
+    // Re-apply active class, filter, and launch form after sidebar SSE re-render
     if (type === "sidebar") {
+      saveLaunchFormState();
       requestAnimationFrame(function () {
         var sidebar = document.getElementById("sidebar");
         if (!sidebar) return;
@@ -175,6 +215,7 @@
           if (active) active.classList.add("active");
         }
         reapplyFilter();
+        restoreLaunchFormState();
       });
     }
   });
@@ -188,7 +229,7 @@
       }
     }
 
-    // Re-apply active class and filter after sidebar SSE re-render
+    // Re-apply active class, filter, and launch form after sidebar SSE re-render
     if (e.detail.target && e.detail.target.id === "sidebar") {
       if (currentSessionId) {
         var cards = e.detail.target.querySelectorAll(".session-card");
@@ -201,6 +242,7 @@
         if (active) active.classList.add("active");
       }
       reapplyFilter();
+      restoreLaunchFormState();
     }
   });
 

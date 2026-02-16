@@ -145,8 +145,7 @@ function renderUserMessage(msg: ParsedMessage): string {
   const text = msg.text ?? "";
   if (!text.trim()) return "";
 
-  return `<div class="message message--user" data-uuid="${msg.uuid}">
-    <div class="message-role">User</div>
+  return `<div class="message message--user" data-uuid="${msg.uuid}" title="User">
     <div class="message-content">${escapeHtml(text)}</div>
   </div>`;
 }
@@ -154,8 +153,7 @@ function renderUserMessage(msg: ParsedMessage): string {
 function renderAssistantMessage(msg: ParsedMessage): string {
   if (!msg.contentBlocks?.length) return "";
 
-  let html = `<div class="message message--assistant" data-uuid="${msg.uuid}">
-    <div class="message-role">Assistant</div>
+  let html = `<div class="message message--assistant" data-uuid="${msg.uuid}" title="Assistant">
     <div class="message-content">`;
 
   for (const block of msg.contentBlocks) {
@@ -241,15 +239,13 @@ function renderProgressMessage(msg: ParsedMessage): string {
 
 function renderSystemMessage(msg: ParsedMessage): string {
   if (msg.systemSubtype === "stop_hook_summary") {
-    return `<div class="message message--system">
-      <div class="message-role">System</div>
+    return `<div class="message message--system" title="System">
       <div class="message-content">Session stopped — waiting for input</div>
     </div>`;
   }
 
   if (msg.durationMs) {
-    return `<div class="message message--system">
-      <div class="message-role">System</div>
+    return `<div class="message message--system" title="System">
       <div class="message-content">Turn completed in ${formatDuration(msg.durationMs)}</div>
     </div>`;
   }

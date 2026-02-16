@@ -221,8 +221,8 @@ app.post("/launch", async (c) => {
       tell application "System Events"
         tell process "Cursor"
           set frontmost to true
-          -- Create New Terminal: Ctrl+Shift+\`
-          key code 50 using {control down, shift down}
+          -- Split Terminal: Cmd+\\
+          key code 42 using {command down}
           delay 1
           keystroke "bash ${tmpScript}"
           delay 0.2

@@ -594,32 +594,6 @@ ul, ol {
   background: transparent;
 }
 
-.message-role {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 2px;
-  color: var(--text-dim);
-}
-
-.message--user .message-role {
-  color: var(--msg-user);
-}
-
-.message--assistant .message-role {
-  color: var(--msg-assistant);
-}
-
-.message--tool .message-role {
-  color: var(--msg-tool);
-}
-
-.message--system .message-role {
-  color: var(--msg-system);
-}
-
 .message-content {
   white-space: pre-wrap;
   word-break: break-word;
@@ -931,10 +905,6 @@ ul, ol {
 .message--permission {
   border-left-color: var(--status-amber);
   background: rgba(251, 191, 36, 0.04);
-}
-
-.message--permission .message-role {
-  color: var(--status-amber);
 }
 
 /* --------------------------------------------------------------------------

@@ -36,6 +36,15 @@ export interface Session {
   turnCount: number;
   pid: number;
   lockFile: string;
+  /** Registry file backing this session (if wrapper-detected), or empty */
+  registryFile: string;
+}
+
+interface RegistryEntry {
+  pid: number;
+  cwd: string;
+  startedAt: number;
+  file: string; // filename e.g. "12345.json"
 }
 
 export interface LaunchableRepo {
@@ -85,12 +94,14 @@ export interface ContentBlock {
 
 const CLAUDE_DIR = join(homedir(), ".claude");
 const IDE_DIR = join(CLAUDE_DIR, "ide");
+const SESSIONS_DIR = join(IDE_DIR, "sessions");
 const PROJECTS_DIR = join(CLAUDE_DIR, "projects");
 const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const DISCOVERY_INTERVAL = 3000;
 const TAIL_FALLBACK_INTERVAL = 500;
 const PROGRESS_DEBOUNCE_MS = 200;
-const ACTIVITY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes — only for initial discovery of new JSONLs
+const ACTIVITY_WINDOW_MS = 5 * 60 * 1000; // fallback: mtime window when no registry
+const BIRTH_WINDOW_MS = 30_000; // match JSONL born within 30s of registry startedAt
 // --- Helpers ---
 
 function extractPort(lockFileName: string): number | null {
@@ -157,10 +168,11 @@ export class SessionManager {
 
   private async discover() {
     try {
+      const registry = await this.scanRegistry();
       const locks = await this.scanLockFiles();
       const validLocks = await this.validatePids(locks);
       const reachableLocks = await this.validateTransports(validLocks);
-      const changed = await this.reconcileSessions(reachableLocks);
+      const changed = await this.reconcileSessions(registry, reachableLocks);
       await this.scanLaunchableRepos();
       if (changed) {
         this.onSessionChange(this.getSessions());
@@ -211,27 +223,196 @@ export class SessionManager {
     });
   }
 
-  private async reconcileSessions(locks: LockInfo[]): Promise<boolean> {
-    let changed = false;
+  private async scanRegistry(): Promise<RegistryEntry[]> {
+    const entries: RegistryEntry[] = [];
+    try {
+      const files = await readdir(SESSIONS_DIR);
+      for (const file of files) {
+        if (!file.endsWith(".json")) continue;
+        try {
+          const content = await readFile(join(SESSIONS_DIR, file), "utf-8");
+          const data = JSON.parse(content);
+          // Validate PID is still alive
+          try { process.kill(data.pid, 0); } catch { continue; }
+          entries.push({ ...data, file });
+        } catch {
+          // skip corrupt/unreadable
+        }
+      }
+    } catch {
+      // sessions dir may not exist yet
+    }
+    return entries;
+  }
 
-    // Build workspace → lock mapping (one lock per workspace)
-    const workspaceLocks = new Map<string, LockInfo>();
-    for (const lock of locks) {
-      const workspace = lock.workspaceFolders[0];
-      if (workspace) workspaceLocks.set(workspace, lock);
+  private async findJsonlForRegistry(
+    entry: RegistryEntry,
+    projectDir: string,
+    claimedJsonls: Set<string>,
+  ): Promise<string | null> {
+    try {
+      const files = await readdir(projectDir);
+      const jsonls = files.filter((f) => f.endsWith(".jsonl"));
+      if (jsonls.length === 0) return null;
+
+      const candidates: { path: string; birthtime: number; mtime: number }[] = [];
+      for (const file of jsonls) {
+        const fullPath = join(projectDir, file);
+        if (claimedJsonls.has(fullPath)) continue;
+        try {
+          const s = await stat(fullPath);
+          candidates.push({ path: fullPath, birthtime: s.birthtimeMs, mtime: s.mtimeMs });
+        } catch { /* skip */ }
+      }
+      if (candidates.length === 0) return null;
+
+      // Primary: JSONL born AFTER process start (new conversation)
+      // Only look forward — prevents matching old JSONLs from previous sessions
+      const newJsonls = candidates
+        .filter((c) => c.birthtime >= entry.startedAt - 2000) // 2s tolerance for clock jitter
+        .sort((a, b) => a.birthtime - b.birthtime); // earliest first
+      if (newJsonls.length > 0) return newJsonls[0]!.path;
+
+      // Fallback: most recently modified JSONL modified after process start (resumed conversation)
+      const resumed = candidates
+        .filter((c) => c.mtime > entry.startedAt)
+        .sort((a, b) => b.mtime - a.mtime);
+      return resumed[0]?.path ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async findNewerConversation(
+    session: Session,
+    entry: RegistryEntry,
+    claimedJsonls: Set<string>,
+  ): Promise<string | null> {
+    try {
+      const currentBirth = (await stat(session.jsonlPath)).birthtimeMs;
+      const files = await readdir(session.projectDir);
+      const jsonls = files.filter((f) => f.endsWith(".jsonl"));
+
+      let newest: { path: string; birthtime: number } | null = null;
+      for (const file of jsonls) {
+        const fullPath = join(session.projectDir, file);
+        if (fullPath === session.jsonlPath) continue;
+        if (claimedJsonls.has(fullPath)) continue;
+        try {
+          const s = await stat(fullPath);
+          // Must be born AFTER current JSONL AND after process start
+          if (s.birthtimeMs > currentBirth && s.birthtimeMs >= entry.startedAt - 2000) {
+            if (!newest || s.birthtimeMs > newest.birthtime) {
+              newest = { path: fullPath, birthtime: s.birthtimeMs };
+            }
+          }
+        } catch { /* skip */ }
+      }
+      return newest?.path ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private removeSession(id: string) {
+    this.tailers.get(id)?.stop();
+    this.tailers.delete(id);
+    this.sessions.delete(id);
+  }
+
+  private async reconcileSessions(
+    registry: RegistryEntry[],
+    locks: LockInfo[],
+  ): Promise<boolean> {
+    let changed = false;
+    const now = Date.now();
+
+    // --- Phase 1: Registry-based sessions (authoritative start/stop) ---
+
+    const activeRegistryFiles = new Set(registry.map((e) => e.file));
+    const claimedJsonls = new Set<string>();
+
+    // Keep existing registry-backed sessions that are still alive
+    for (const session of this.sessions.values()) {
+      if (session.registryFile && activeRegistryFiles.has(session.registryFile)) {
+        claimedJsonls.add(session.jsonlPath);
+      }
     }
 
-    // Track which JSONL paths are already sessions
-    const trackedJsonls = new Set(
-      Array.from(this.sessions.values()).map((s) => s.jsonlPath)
-    );
+    // Build lookup of existing sessions by registry file
+    const sessionsByRegistry = new Map<string, Session>();
+    for (const session of this.sessions.values()) {
+      if (session.registryFile) sessionsByRegistry.set(session.registryFile, session);
+    }
 
-    // For each active workspace, discover all recently-active JSONLs
-    const now = Date.now();
+    for (const entry of registry) {
+      const workspace = entry.cwd;
+      const projectDir = this.workspaceToProjectDir(workspace);
+      if (!projectDir) continue;
+
+      const existing = sessionsByRegistry.get(entry.file);
+      if (existing) {
+        // Already tracking — check if a NEW conversation started in this same instance.
+        // Only consider JSONLs born AFTER the current one (strict birthtime check,
+        // no mtime fallback — prevents stealing other instances' unclaimed JSONLs).
+        const newerJsonl = await this.findNewerConversation(existing, entry, claimedJsonls);
+        if (newerJsonl) {
+          claimedJsonls.delete(existing.jsonlPath);
+          claimedJsonls.add(newerJsonl);
+          this.removeSession(existing.id);
+
+          const sessionId = basename(newerJsonl, ".jsonl");
+          const lock = locks.find((l) => l.workspaceFolders[0] === workspace);
+          const session: Session = {
+            id: sessionId, slug: "", projectDir, workspaceFolder: workspace,
+            repoName: this.extractRepoName(workspace),
+            ideName: lock?.ideName ?? "Terminal",
+            jsonlPath: newerJsonl, status: "idle", lastMessagePreview: "",
+            lastActivity: new Date(), gitBranch: "",
+            totalTokens: 0, turnCount: 0, pid: entry.pid,
+            lockFile: lock?.lockFile ?? "", registryFile: entry.file,
+          };
+          this.sessions.set(sessionId, session);
+          this.startTailing(session);
+          changed = true;
+        }
+        continue;
+      }
+
+      // New registry entry — find its JSONL
+      const jsonlPath = await this.findJsonlForRegistry(entry, projectDir, claimedJsonls);
+      if (!jsonlPath) continue; // retry next cycle
+
+      const sessionId = basename(jsonlPath, ".jsonl");
+      claimedJsonls.add(jsonlPath);
+
+      const lock = locks.find((l) => l.workspaceFolders[0] === workspace);
+      const session: Session = {
+        id: sessionId, slug: "", projectDir, workspaceFolder: workspace,
+        repoName: this.extractRepoName(workspace),
+        ideName: lock?.ideName ?? "Terminal",
+        jsonlPath, status: "idle", lastMessagePreview: "",
+        lastActivity: new Date(), gitBranch: "",
+        totalTokens: 0, turnCount: 0, pid: entry.pid,
+        lockFile: lock?.lockFile ?? "", registryFile: entry.file,
+      };
+      this.sessions.set(sessionId, session);
+      this.startTailing(session);
+      changed = true;
+    }
+
+    // --- Phase 2: Lock-based fallback (workspaces without any registry entries) ---
+
+    const registryWorkspaces = new Set(registry.map((e) => e.cwd));
     const activeWorkspaces = new Set<string>();
 
-    for (const [workspace, lock] of workspaceLocks) {
+    for (const lock of locks) {
+      const workspace = lock.workspaceFolders[0];
+      if (!workspace) continue;
       activeWorkspaces.add(workspace);
+
+      // Skip workspaces that have registry entries (already handled above)
+      if (registryWorkspaces.has(workspace)) continue;
 
       const projectDir = this.workspaceToProjectDir(workspace);
       if (!projectDir) continue;
@@ -242,65 +423,56 @@ export class SessionManager {
 
         for (const file of jsonls) {
           const fullPath = join(projectDir, file);
-          if (trackedJsonls.has(fullPath)) continue; // already tracking
+          if (claimedJsonls.has(fullPath)) continue;
 
           try {
             const s = await stat(fullPath);
             if (now - s.mtimeMs < ACTIVITY_WINDOW_MS) {
               const sessionId = basename(fullPath, ".jsonl");
+              claimedJsonls.add(fullPath);
               const session: Session = {
-                id: sessionId,
-                slug: "",
-                projectDir,
-                workspaceFolder: workspace,
+                id: sessionId, slug: "", projectDir, workspaceFolder: workspace,
                 repoName: this.extractRepoName(workspace),
                 ideName: lock.ideName,
-                jsonlPath: fullPath,
-                status: "idle",
-                lastMessagePreview: "",
-                lastActivity: new Date(),
-                gitBranch: "",
-                totalTokens: 0,
-                turnCount: 0,
-                pid: lock.pid,
-                lockFile: lock.lockFile,
+                jsonlPath: fullPath, status: "idle", lastMessagePreview: "",
+                lastActivity: new Date(), gitBranch: "",
+                totalTokens: 0, turnCount: 0, pid: lock.pid,
+                lockFile: lock.lockFile, registryFile: "",
               };
               this.sessions.set(sessionId, session);
               this.startTailing(session);
-              trackedJsonls.add(fullPath);
+              changed = true;
+            }
+          } catch { /* skip */ }
+        }
+      } catch { /* projectDir doesn't exist */ }
+    }
+
+    // --- Phase 3: Cleanup ---
+
+    for (const [id, session] of this.sessions) {
+      if (session.registryFile) {
+        // Registry-backed: remove if registry file is gone
+        if (!activeRegistryFiles.has(session.registryFile)) {
+          this.removeSession(id);
+          changed = true;
+        }
+      } else {
+        // Lock-backed fallback: remove if workspace gone OR JSONL stale
+        if (!activeWorkspaces.has(session.workspaceFolder)) {
+          this.removeSession(id);
+          changed = true;
+        } else {
+          try {
+            const s = await stat(session.jsonlPath);
+            if (now - s.mtimeMs >= ACTIVITY_WINDOW_MS) {
+              this.removeSession(id);
               changed = true;
             }
           } catch {
-            // skip unreadable files
-          }
-        }
-      } catch {
-        // projectDir doesn't exist yet
-      }
-    }
-
-    // Remove sessions whose workspace lock is gone OR whose JSONL is stale
-    for (const [id, session] of this.sessions) {
-      if (!activeWorkspaces.has(session.workspaceFolder)) {
-        this.tailers.get(id)?.stop();
-        this.tailers.delete(id);
-        this.sessions.delete(id);
-        changed = true;
-      } else {
-        try {
-          const s = await stat(session.jsonlPath);
-          if (now - s.mtimeMs >= ACTIVITY_WINDOW_MS) {
-            this.tailers.get(id)?.stop();
-            this.tailers.delete(id);
-            this.sessions.delete(id);
+            this.removeSession(id);
             changed = true;
           }
-        } catch {
-          // JSONL gone, remove session
-          this.tailers.get(id)?.stop();
-          this.tailers.delete(id);
-          this.sessions.delete(id);
-          changed = true;
         }
       }
     }

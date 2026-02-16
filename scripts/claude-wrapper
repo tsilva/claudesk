@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# Claude wrapper — creates a session registry entry so the claudesk
+# dashboard knows exactly when a claude instance starts and stops.
+#
+# Install:
+#   mkdir -p ~/.claude/bin
+#   ln -sf "$(pwd)/scripts/claude-wrapper" ~/.claude/bin/claude
+#   # Add to ~/.zshrc (BEFORE the line that adds .local/bin):
+#   export PATH="$HOME/.claude/bin:$PATH"
+
+set -euo pipefail
+
+SESSIONS_DIR="$HOME/.claude/ide/sessions"
+mkdir -p "$SESSIONS_DIR"
+
+# --- Find real claude binary (skip our wrapper directory) ---
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+REAL_CLAUDE=""
+
+IFS=: read -ra PATH_DIRS <<< "$PATH"
+for dir in "${PATH_DIRS[@]}"; do
+  resolved="$(cd "$dir" 2>/dev/null && pwd)" || continue
+  if [[ "$resolved" != "$SELF_DIR" ]] && [[ -x "$dir/claude" ]]; then
+    REAL_CLAUDE="$dir/claude"
+    break
+  fi
+done
+
+if [[ -z "$REAL_CLAUDE" ]]; then
+  echo "claude-wrapper: could not find real claude binary in PATH" >&2
+  exit 127
+fi
+
+# --- Create registry entry ---
+REG_FILE="$SESSIONS_DIR/$$.json"
+printf '{"pid":%d,"cwd":"%s","startedAt":%s}\n' \
+  "$$" "$PWD" "$(date +%s)000" > "$REG_FILE"
+
+# --- Clean up on exit (covers EXIT, INT, TERM, HUP) ---
+trap 'rm -f "$REG_FILE"' EXIT
+
+# --- Run real claude (foreground — inherits tty, stdin, stdout) ---
+"$REAL_CLAUDE" "$@"

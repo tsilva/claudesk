@@ -109,6 +109,14 @@ This extension adds support for Server Sent Events to htmx.  See /www/extensions
       var sseSwapAttr = api.getAttributeValue(elt, 'sse-swap')
       var sseEventNames = sseSwapAttr.split(',')
 
+      // Remove previous listener to prevent duplicate registration
+      var existingListener = api.getInternalData(elt).sseEventListener
+      if (existingListener && source) {
+        for (var j = 0; j < sseEventNames.length; j++) {
+          source.removeEventListener(sseEventNames[j].trim(), existingListener)
+        }
+      }
+
       for (var i = 0; i < sseEventNames.length; i++) {
         const sseEventName = sseEventNames[i].trim()
         const listener = function(event) {
@@ -151,6 +159,17 @@ This extension adds support for Server Sent Events to htmx.  See /www/extensions
       var source = internalData.sseEventSource
 
       var triggerSpecs = api.getTriggerSpecs(elt)
+
+      // Remove previous listener to prevent duplicate registration
+      var existingTriggerListener = api.getInternalData(elt).sseEventListener
+      if (existingTriggerListener && source) {
+        triggerSpecs.forEach(function(ts) {
+          if (ts.trigger.slice(0, 4) === 'sse:') {
+            source.removeEventListener(ts.trigger.slice(4), existingTriggerListener)
+          }
+        })
+      }
+
       triggerSpecs.forEach(function(ts) {
         if (ts.trigger.slice(0, 4) !== 'sse:') {
           return

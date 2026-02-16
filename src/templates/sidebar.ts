@@ -58,7 +58,7 @@ export function renderSidebar(
     for (const repo of repos.slice(0, 20)) {
       html += `<button class="launch-item"
         hx-post="/launch"
-        hx-vals='${JSON.stringify({ path: repo.path })}'
+        hx-vals='${escapeHtml(JSON.stringify({ path: repo.path }))}'
         hx-swap="none">
         <span>${escapeHtml(repo.name)}</span>
         <span class="launch-item-action">+</span>

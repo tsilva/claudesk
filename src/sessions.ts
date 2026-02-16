@@ -34,6 +34,8 @@ export interface Session {
   gitBranch: string;
   totalTokens: number;
   turnCount: number;
+  pid: number;
+  lockFile: string;
 }
 
 export interface LaunchableRepo {
@@ -88,6 +90,7 @@ const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const DISCOVERY_INTERVAL = 3000;
 const TAIL_FALLBACK_INTERVAL = 500;
 const PROGRESS_DEBOUNCE_MS = 200;
+const ACTIVITY_WINDOW_MS = 5 * 60 * 1000; // 5 minutes — only for initial discovery of new JSONLs
 // --- Helpers ---
 
 function extractPort(lockFileName: string): number | null {
@@ -210,83 +213,95 @@ export class SessionManager {
 
   private async reconcileSessions(locks: LockInfo[]): Promise<boolean> {
     let changed = false;
-    const seenWorkspaces = new Set<string>();
 
+    // Build workspace → lock mapping (one lock per workspace)
+    const workspaceLocks = new Map<string, LockInfo>();
     for (const lock of locks) {
       const workspace = lock.workspaceFolders[0];
-      if (!workspace) continue;
-      seenWorkspaces.add(workspace);
+      if (workspace) workspaceLocks.set(workspace, lock);
+    }
+
+    // Track which JSONL paths are already sessions
+    const trackedJsonls = new Set(
+      Array.from(this.sessions.values()).map((s) => s.jsonlPath)
+    );
+
+    // For each active workspace, discover all recently-active JSONLs
+    const now = Date.now();
+    const activeWorkspaces = new Set<string>();
+
+    for (const [workspace, lock] of workspaceLocks) {
+      activeWorkspaces.add(workspace);
 
       const projectDir = this.workspaceToProjectDir(workspace);
       if (!projectDir) continue;
 
-      const jsonlPath = await this.findActiveJsonl(projectDir);
-      if (!jsonlPath) continue;
+      try {
+        const files = await readdir(projectDir);
+        const jsonls = files.filter((f) => f.endsWith(".jsonl"));
 
-      const sessionId = basename(jsonlPath, ".jsonl");
+        for (const file of jsonls) {
+          const fullPath = join(projectDir, file);
+          if (trackedJsonls.has(fullPath)) continue; // already tracking
 
-      // Check if we already track this workspace
-      const existingByWorkspace = Array.from(this.sessions.values()).find(
-        (s) => s.workspaceFolder === workspace
-      );
-
-      if (existingByWorkspace) {
-        // Same workspace — update JSONL if it changed
-        if (existingByWorkspace.jsonlPath !== jsonlPath) {
-          // JSONL changed (new conversation started)
-          this.tailers.get(existingByWorkspace.id)?.stop();
-          this.tailers.delete(existingByWorkspace.id);
-          this.sessions.delete(existingByWorkspace.id);
-
-          const session: Session = {
-            id: sessionId,
-            slug: "",
-            projectDir,
-            workspaceFolder: workspace,
-            repoName: this.extractRepoName(workspace),
-            ideName: lock.ideName,
-            jsonlPath,
-            status: "idle",
-            lastMessagePreview: "",
-            lastActivity: new Date(),
-            gitBranch: "",
-            totalTokens: 0,
-            turnCount: 0,
-          };
-          this.sessions.set(sessionId, session);
-          this.startTailing(session);
-          changed = true;
+          try {
+            const s = await stat(fullPath);
+            if (now - s.mtimeMs < ACTIVITY_WINDOW_MS) {
+              const sessionId = basename(fullPath, ".jsonl");
+              const session: Session = {
+                id: sessionId,
+                slug: "",
+                projectDir,
+                workspaceFolder: workspace,
+                repoName: this.extractRepoName(workspace),
+                ideName: lock.ideName,
+                jsonlPath: fullPath,
+                status: "idle",
+                lastMessagePreview: "",
+                lastActivity: new Date(),
+                gitBranch: "",
+                totalTokens: 0,
+                turnCount: 0,
+                pid: lock.pid,
+                lockFile: lock.lockFile,
+              };
+              this.sessions.set(sessionId, session);
+              this.startTailing(session);
+              trackedJsonls.add(fullPath);
+              changed = true;
+            }
+          } catch {
+            // skip unreadable files
+          }
         }
-      } else {
-        // New workspace discovered
-        const session: Session = {
-          id: sessionId,
-          slug: "",
-          projectDir,
-          workspaceFolder: workspace,
-          repoName: this.extractRepoName(workspace),
-          ideName: lock.ideName,
-          jsonlPath,
-          status: "idle",
-          lastMessagePreview: "",
-          lastActivity: new Date(),
-          gitBranch: "",
-          totalTokens: 0,
-          turnCount: 0,
-        };
-        this.sessions.set(sessionId, session);
-        this.startTailing(session);
-        changed = true;
+      } catch {
+        // projectDir doesn't exist yet
       }
     }
 
-    // Remove sessions whose workspace is no longer active
+    // Remove sessions whose workspace lock is gone OR whose JSONL is stale
     for (const [id, session] of this.sessions) {
-      if (!seenWorkspaces.has(session.workspaceFolder)) {
+      if (!activeWorkspaces.has(session.workspaceFolder)) {
         this.tailers.get(id)?.stop();
         this.tailers.delete(id);
         this.sessions.delete(id);
         changed = true;
+      } else {
+        try {
+          const s = await stat(session.jsonlPath);
+          if (now - s.mtimeMs >= ACTIVITY_WINDOW_MS) {
+            this.tailers.get(id)?.stop();
+            this.tailers.delete(id);
+            this.sessions.delete(id);
+            changed = true;
+          }
+        } catch {
+          // JSONL gone, remove session
+          this.tailers.get(id)?.stop();
+          this.tailers.delete(id);
+          this.sessions.delete(id);
+          changed = true;
+        }
       }
     }
 
@@ -302,31 +317,6 @@ export class SessionManager {
 
   private extractRepoName(workspace: string): string {
     return basename(workspace);
-  }
-
-  private async findActiveJsonl(projectDir: string): Promise<string | null> {
-    try {
-      const files = await readdir(projectDir);
-      const jsonls = files.filter((f) => f.endsWith(".jsonl"));
-      if (jsonls.length === 0) return null;
-
-      // Find most recently modified
-      let newest: { path: string; mtime: number } | null = null;
-      for (const file of jsonls) {
-        const fullPath = join(projectDir, file);
-        try {
-          const s = await stat(fullPath);
-          if (!newest || s.mtimeMs > newest.mtime) {
-            newest = { path: fullPath, mtime: s.mtimeMs };
-          }
-        } catch {
-          // skip
-        }
-      }
-      return newest?.path ?? null;
-    } catch {
-      return null;
-    }
   }
 
   private startTailing(session: Session) {

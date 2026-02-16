@@ -88,6 +88,25 @@ const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const DISCOVERY_INTERVAL = 3000;
 const TAIL_FALLBACK_INTERVAL = 500;
 const PROGRESS_DEBOUNCE_MS = 200;
+// --- Helpers ---
+
+function extractPort(lockFileName: string): number | null {
+  const match = lockFileName.match(/^(\d+)\.lock$/);
+  return match?.[1] ? parseInt(match[1], 10) : null;
+}
+
+async function getPortsWithEstablished(): Promise<Set<number>> {
+  const proc = Bun.spawn(["netstat", "-an"], { stdout: "pipe", stderr: "ignore" });
+  const output = await new Response(proc.stdout).text();
+  const ports = new Set<number>();
+  for (const line of output.split("\n")) {
+    if (!line.includes("ESTABLISHED")) continue;
+    // Match local address like 127.0.0.1.PORT
+    const match = line.match(/127\.0\.0\.1\.(\d+)\s/);
+    if (match?.[1]) ports.add(parseInt(match[1], 10));
+  }
+  return ports;
+}
 
 // --- Session Manager ---
 
@@ -137,7 +156,8 @@ export class SessionManager {
     try {
       const locks = await this.scanLockFiles();
       const validLocks = await this.validatePids(locks);
-      const changed = await this.reconcileSessions(validLocks);
+      const reachableLocks = await this.validateTransports(validLocks);
+      const changed = await this.reconcileSessions(reachableLocks);
       await this.scanLaunchableRepos();
       if (changed) {
         this.onSessionChange(this.getSessions());
@@ -175,6 +195,16 @@ export class SessionManager {
       } catch {
         return false;
       }
+    });
+  }
+
+  private async validateTransports(locks: LockInfo[]): Promise<LockInfo[]> {
+    const activePorts = await getPortsWithEstablished();
+    return locks.filter((lock) => {
+      if (lock.transport !== "ws") return true;
+      const port = extractPort(lock.lockFile);
+      if (port === null) return true;
+      return activePorts.has(port);
     });
   }
 

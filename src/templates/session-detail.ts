@@ -30,6 +30,8 @@ export function renderSessionDetail(session: Session, messages: ParsedMessage[] 
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend scroll:bottom">
       ${messagesHtml}
     </div>
+    <div id="progress-indicator" class="progress-indicator"
+         sse-swap="stream-progress" hx-swap="innerHTML"></div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
       ${renderSessionStats(session)}
     </div>

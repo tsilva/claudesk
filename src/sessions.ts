@@ -424,6 +424,7 @@ class JsonlTailer {
   private progressDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private lastProgressMsg: ParsedMessage | null = null;
   private initialLoadDone = false;
+  private reading = false;
 
   constructor(filePath: string, callback: (msg: ParsedMessage) => void) {
     this.filePath = filePath;
@@ -484,6 +485,8 @@ class JsonlTailer {
   }
 
   private async readNewContent() {
+    if (this.reading) return;
+    this.reading = true;
     try {
       const file = Bun.file(this.filePath);
       const size = file.size;
@@ -507,6 +510,8 @@ class JsonlTailer {
       }
     } catch {
       // File read error — will retry on next poll
+    } finally {
+      this.reading = false;
     }
   }
 

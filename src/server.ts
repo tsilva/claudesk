@@ -34,34 +34,44 @@ function broadcastAll(event: string, data: string) {
   }
 }
 
+function broadcastSidebar() {
+  const sessions = sessionManager.getSessions();
+  const repos = sessionManager.getLaunchableRepos();
+  for (const client of clients.values()) {
+    const html = renderSidebar(sessions, repos, client.sessionId ?? undefined);
+    client.send("sidebar", html);
+  }
+}
+
 // --- Session Manager ---
 
 const sessionManager = new SessionManager(
   // onMessage callback
   (msg: ParsedMessage, session: Session) => {
-    const html = renderMessage(msg);
-    if (html) {
-      broadcast("stream-append", html, session.id);
+    if (msg.type === "progress") {
+      const html = renderMessage(msg);
+      if (html) {
+        broadcast("stream-progress", html, session.id);
+      }
+    } else {
+      // Clear progress indicator before appending real content
+      broadcast("stream-progress", "", session.id);
+      const html = renderMessage(msg);
+      if (html) {
+        broadcast("stream-append", html, session.id);
+      }
     }
     // Update sidebar for all clients on status changes
     if (msg.type === "user" || msg.type === "assistant" || msg.type === "system") {
-      const sidebarHtml = renderSidebar(
-        sessionManager.getSessions(),
-        sessionManager.getLaunchableRepos()
-      );
-      broadcastAll("sidebar", sidebarHtml);
+      broadcastSidebar();
       // Update stats for viewers of this session
       const statsHtml = renderSessionStats(session);
       broadcast("session-stats", statsHtml, session.id);
     }
   },
   // onSessionChange callback
-  (sessions: Session[]) => {
-    const sidebarHtml = renderSidebar(
-      sessions,
-      sessionManager.getLaunchableRepos()
-    );
-    broadcastAll("sidebar", sidebarHtml);
+  (_sessions: Session[]) => {
+    broadcastSidebar();
   }
 );
 
@@ -160,11 +170,7 @@ app.post("/api/hook", async (c) => {
       }));
 
       // Update sidebar
-      const sidebarHtml = renderSidebar(
-        sessionManager.getSessions(),
-        sessionManager.getLaunchableRepos()
-      );
-      broadcastAll("sidebar", sidebarHtml);
+      broadcastSidebar();
     }
 
     return c.json({ ok: true });

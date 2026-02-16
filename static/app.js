@@ -104,10 +104,28 @@
     userScrolledUp = !atBottom;
   }, true);
 
-  // Auto-scroll when new content is appended via SSE
+  // Auto-scroll when new content is appended via SSE, and re-apply sidebar active class
   document.body.addEventListener("htmx:sseMessage", function (e) {
-    if (e.detail.type === "stream-append" && !userScrolledUp) {
+    var type = e.detail.type;
+
+    if ((type === "stream-append" || type === "stream-progress") && !userScrolledUp) {
       requestAnimationFrame(scrollToBottom);
+    }
+
+    // Re-apply active class after sidebar SSE re-render
+    if (type === "sidebar" && currentSessionId) {
+      requestAnimationFrame(function () {
+        var sidebar = document.getElementById("sidebar");
+        if (!sidebar) return;
+        var cards = sidebar.querySelectorAll(".session-card");
+        cards.forEach(function (card) {
+          card.classList.remove("active");
+        });
+        var active = sidebar.querySelector(
+          '[hx-get="/sessions/' + currentSessionId + '/detail"]'
+        );
+        if (active) active.classList.add("active");
+      });
     }
   });
 

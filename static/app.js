@@ -1,12 +1,10 @@
 // claudesk client-side JS
-// Handles: notifications, auto-scroll, SSE session switching, connection status
+// Handles: notifications, SSE session switching, connection status
 
 (function () {
   // --- State ---
   let notificationsEnabled = false;
   let currentSessionId = null;
-  let autoScroll = true;
-  let userScrolledUp = false;
 
   // --- Notifications ---
 
@@ -81,36 +79,10 @@
     }
   });
 
-  // --- Auto-scroll ---
+  // --- SSE sidebar active-class logic ---
 
-  function getStreamContainer() {
-    return document.getElementById("conversation-stream");
-  }
-
-  function scrollToBottom() {
-    var container = getStreamContainer();
-    if (container) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }
-
-  // Track if user has manually scrolled up
-  document.addEventListener("scroll", function (e) {
-    var container = getStreamContainer();
-    if (!container || e.target !== container) return;
-
-    var atBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 60;
-    userScrolledUp = !atBottom;
-  }, true);
-
-  // Auto-scroll when new content is appended via SSE, and re-apply sidebar active class
   document.body.addEventListener("htmx:sseMessage", function (e) {
     var type = e.detail.type;
-
-    if ((type === "stream-append" || type === "stream-progress") && !userScrolledUp) {
-      requestAnimationFrame(scrollToBottom);
-    }
 
     // Re-apply active class after sidebar SSE re-render
     if (type === "sidebar" && currentSessionId) {
@@ -129,30 +101,13 @@
     }
   });
 
-  // Also observe DOM mutations on the stream container for auto-scroll
-  var observer = new MutationObserver(function () {
-    if (!userScrolledUp) {
-      requestAnimationFrame(scrollToBottom);
-    }
-  });
-
-  function observeStream() {
-    var container = getStreamContainer();
-    if (container) {
-      observer.disconnect();
-      observer.observe(container, { childList: true, subtree: true });
-      // Scroll to bottom on initial load
-      scrollToBottom();
-    }
-  }
-
-  // Re-observe when session detail is swapped
+  // Re-apply active class after sidebar htmx swap; scroll to top on session load
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.detail.target && e.detail.target.id === "session-detail") {
-      userScrolledUp = false;
-      requestAnimationFrame(function () {
-        observeStream();
-      });
+      var container = document.getElementById("conversation-stream");
+      if (container) {
+        container.scrollTop = 0;
+      }
     }
 
     // Re-apply active class after sidebar SSE re-render
@@ -173,7 +128,6 @@
   window.switchSession = function (sessionId) {
     if (sessionId === currentSessionId) return;
     currentSessionId = sessionId;
-    userScrolledUp = false;
 
     // Update active state in sidebar
     var cards = document.querySelectorAll(".session-card");
@@ -235,7 +189,4 @@
       currentSessionId = match[1];
     }
   }
-
-  // Start observing stream container
-  requestAnimationFrame(observeStream);
 })();

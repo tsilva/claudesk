@@ -6,6 +6,8 @@ export function renderSessionDetail(session: Session, messages: ParsedMessage[] 
 
   // Render initial messages inline
   const messagesHtml = messages
+    .slice()
+    .reverse()
     .map((msg) => renderMessage(msg))
     .filter(Boolean)
     .join("\n");
@@ -27,11 +29,11 @@ export function renderSessionDetail(session: Session, messages: ParsedMessage[] 
         </button>
       </div>
     </div>
-    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend scroll:bottom">
-      ${messagesHtml}
-    </div>
     <div id="progress-indicator" class="progress-indicator"
          sse-swap="stream-progress" hx-swap="innerHTML"></div>
+    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
+      ${messagesHtml}
+    </div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
       ${renderSessionStats(session)}
     </div>

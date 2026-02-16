@@ -57,6 +57,59 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function truncatePreview(str: string, max = 80): string {
+  const collapsed = str.replace(/\n/g, " ").trim();
+  if (collapsed.length <= max) return collapsed;
+  return collapsed.slice(0, max) + "...";
+}
+
+function getToolPreview(toolName: string, toolInput: Record<string, any> | null | undefined): string {
+  if (!toolInput) return "";
+  const inp = toolInput;
+
+  switch (toolName) {
+    case "Bash":
+      return truncatePreview(inp.command ?? inp.description ?? "");
+    case "Read":
+      return truncatePreview(
+        (inp.file_path ?? "") +
+        (inp.offset ? ` L${inp.offset}` : "") +
+        (inp.limit ? ` +${inp.limit}` : "")
+      );
+    case "Grep":
+      return truncatePreview(
+        (inp.pattern ?? "") +
+        (inp.path ? ` in ${inp.path}` : "") +
+        (inp.glob ? ` (${inp.glob})` : "")
+      );
+    case "Glob":
+      return truncatePreview(
+        (inp.pattern ?? "") +
+        (inp.path ? ` in ${inp.path}` : "")
+      );
+    case "Edit":
+    case "Write":
+      return truncatePreview(inp.file_path ?? "");
+    case "WebFetch":
+      return truncatePreview(inp.url ?? "");
+    case "WebSearch":
+      return truncatePreview(inp.query ?? "");
+    case "Task":
+      return truncatePreview(inp.description ?? "");
+    case "NotebookEdit":
+      return truncatePreview(inp.notebook_path ?? "");
+    default: {
+      const fallbackKeys = ["command", "file_path", "path", "pattern", "query", "url", "description"];
+      for (const key of fallbackKeys) {
+        if (inp[key] && typeof inp[key] === "string") {
+          return truncatePreview(inp[key]);
+        }
+      }
+      return "";
+    }
+  }
+}
+
 // --- Session Stats ---
 
 export function renderSessionStats(session: Session): string {
@@ -140,11 +193,13 @@ function renderContentBlock(block: ContentBlock): string {
       const displayInput = input.length > 500
         ? input.slice(0, 500) + "\n..."
         : input;
+      const preview = getToolPreview(name, block.toolInput as Record<string, any>);
 
       return `<details class="tool-block">
         <summary class="tool-summary">
           <span class="tool-icon">$</span>
           <span class="tool-name">${escapeHtml(name)}</span>
+          ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
         </summary>
         ${displayInput ? `<pre class="tool-input">${escapeHtml(displayInput)}</pre>` : ""}
       </details>`;
@@ -204,10 +259,19 @@ function renderSystemMessage(msg: ParsedMessage): string {
 
 function renderToolMessage(msg: ParsedMessage): string {
   if (msg.type === "tool_use") {
+    let parsedInput: Record<string, any> | null = null;
+    if (msg.toolInput) {
+      try {
+        parsedInput = JSON.parse(msg.toolInput);
+      } catch {}
+    }
+    const toolName = msg.toolName ?? "Tool";
+    const preview = getToolPreview(toolName, parsedInput);
     return `<details class="message message--tool">
       <summary>
         <span class="tool-icon">$</span>
-        ${escapeHtml(msg.toolName ?? "Tool")}
+        <span class="tool-name">${escapeHtml(toolName)}</span>
+        ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
       </summary>
       ${msg.toolInput ? `<pre class="tool-input">${escapeHtml(msg.toolInput)}</pre>` : ""}
     </details>`;

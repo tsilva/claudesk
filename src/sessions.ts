@@ -588,17 +588,25 @@ export class SessionManager {
 
   private async scanLaunchableRepos() {
     try {
-      const entries = await readdir(REPOS_DIR);
+      const entries = await readdir(REPOS_DIR, { withFileTypes: true });
       const activeWorkspaces = new Set(
         Array.from(this.sessions.values()).map((s) => s.workspaceFolder)
       );
 
-      this.launchableRepos = entries
-        .map((name) => ({
-          name,
-          path: join(REPOS_DIR, name),
-        }))
-        .filter((repo) => !activeWorkspaces.has(repo.path));
+      const repos: LaunchableRepo[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const repoPath = join(REPOS_DIR, entry.name);
+        if (activeWorkspaces.has(repoPath)) continue;
+        try {
+          await stat(join(repoPath, ".git"));
+          repos.push({ name: entry.name, path: repoPath });
+        } catch {
+          // No .git — skip
+        }
+      }
+
+      this.launchableRepos = repos.sort((a, b) => a.name.localeCompare(b.name));
     } catch {
       this.launchableRepos = [];
     }

@@ -37,8 +37,14 @@ export function renderLayout(
       </div>
     </header>
     <div class="main">
-      <aside class="sidebar" id="sidebar" sse-swap="sidebar" hx-swap="innerHTML">
-        ${sidebarHtml}
+      <aside class="sidebar">
+        <div class="sidebar-filter">
+          <input type="text" id="sidebar-filter-input" class="sidebar-filter-input"
+            placeholder="Filter..." autocomplete="off" spellcheck="false">
+        </div>
+        <div class="sidebar-scroll" id="sidebar" sse-swap="sidebar" hx-swap="innerHTML">
+          ${sidebarHtml}
+        </div>
       </aside>
       <div class="content" id="session-detail">
         ${detailHtml}

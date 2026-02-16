@@ -79,24 +79,102 @@
     }
   });
 
+  // --- Sidebar Filter ---
+
+  function filterSidebar(query) {
+    var sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+
+    var q = (query || "").toLowerCase().trim();
+
+    // Filter session cards
+    var cards = sidebar.querySelectorAll(".session-card");
+    cards.forEach(function (card) {
+      if (!q) {
+        card.classList.remove("hidden");
+        return;
+      }
+      var text = card.textContent.toLowerCase();
+      // Also check parent repo group header
+      var group = card.closest(".repo-group");
+      if (group) {
+        var header = group.querySelector(".repo-group-header");
+        if (header) text += " " + header.textContent.toLowerCase();
+      }
+      card.classList.toggle("hidden", text.indexOf(q) === -1);
+    });
+
+    // Hide repo groups where all session cards are hidden
+    var groups = sidebar.querySelectorAll(".repo-group");
+    groups.forEach(function (group) {
+      var groupCards = group.querySelectorAll(".session-card");
+      var allHidden = groupCards.length > 0 && Array.from(groupCards).every(function (c) {
+        return c.classList.contains("hidden");
+      });
+      group.classList.toggle("hidden", allHidden);
+    });
+
+    // Filter launch items
+    var launchItems = sidebar.querySelectorAll(".launch-item-wrapper");
+    var allLaunchHidden = true;
+    launchItems.forEach(function (item) {
+      if (!q) {
+        item.classList.remove("hidden");
+        allLaunchHidden = false;
+        return;
+      }
+      var text = item.textContent.toLowerCase();
+      var match = text.indexOf(q) !== -1;
+      item.classList.toggle("hidden", !match);
+      if (match) allLaunchHidden = false;
+    });
+
+    // Hide launch section header if all items are hidden
+    var launchSection = sidebar.querySelector(".launch-section");
+    if (launchSection) {
+      if (!q) {
+        launchSection.classList.remove("hidden");
+      } else {
+        launchSection.classList.toggle("hidden", allLaunchHidden);
+      }
+    }
+  }
+
+  // Wire up filter input
+  document.addEventListener("input", function (e) {
+    if (e.target && e.target.id === "sidebar-filter-input") {
+      filterSidebar(e.target.value);
+    }
+  });
+
+  function reapplyFilter() {
+    var input = document.getElementById("sidebar-filter-input");
+    if (input && input.value) {
+      filterSidebar(input.value);
+    }
+  }
+
   // --- SSE sidebar active-class logic ---
 
   document.body.addEventListener("htmx:sseMessage", function (e) {
     var type = e.detail.type;
 
-    // Re-apply active class after sidebar SSE re-render
-    if (type === "sidebar" && currentSessionId) {
+    // Re-apply active class and filter after sidebar SSE re-render
+    if (type === "sidebar") {
       requestAnimationFrame(function () {
         var sidebar = document.getElementById("sidebar");
         if (!sidebar) return;
-        var cards = sidebar.querySelectorAll(".session-card");
-        cards.forEach(function (card) {
-          card.classList.remove("active");
-        });
-        var active = sidebar.querySelector(
-          '[hx-get="/sessions/' + currentSessionId + '/detail"]'
-        );
-        if (active) active.classList.add("active");
+        if (currentSessionId) {
+          var cards = sidebar.querySelectorAll(".session-card");
+          cards.forEach(function (card) {
+            card.classList.remove("active");
+          });
+          var active = sidebar.querySelector(
+            '[hx-get="/sessions/' + currentSessionId + '/detail"]'
+          );
+          if (active) active.classList.add("active");
+        }
+        reapplyFilter();
       });
     }
   });
@@ -110,16 +188,19 @@
       }
     }
 
-    // Re-apply active class after sidebar SSE re-render
-    if (e.detail.target && e.detail.target.id === "sidebar" && currentSessionId) {
-      var cards = e.detail.target.querySelectorAll(".session-card");
-      cards.forEach(function (card) {
-        card.classList.remove("active");
-      });
-      var active = e.detail.target.querySelector(
-        '[hx-get="/sessions/' + currentSessionId + '/detail"]'
-      );
-      if (active) active.classList.add("active");
+    // Re-apply active class and filter after sidebar SSE re-render
+    if (e.detail.target && e.detail.target.id === "sidebar") {
+      if (currentSessionId) {
+        var cards = e.detail.target.querySelectorAll(".session-card");
+        cards.forEach(function (card) {
+          card.classList.remove("active");
+        });
+        var active = e.detail.target.querySelector(
+          '[hx-get="/sessions/' + currentSessionId + '/detail"]'
+        );
+        if (active) active.classList.add("active");
+      }
+      reapplyFilter();
     }
   });
 

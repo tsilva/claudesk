@@ -18,8 +18,23 @@ export function renderSidebar(
 
   // Session groups
   for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const workspaceFolder = repoSessions[0].workspaceFolder;
     html += `<div class="repo-group">
-      <div class="repo-group-header">${escapeHtml(repoName)}</div>`;
+      <div class="launch-item-wrapper">
+        <div class="repo-group-header" onclick="toggleLaunchPrompt(this)" style="cursor:pointer">
+          <span>${escapeHtml(repoName)}</span>
+          <span class="launch-item-action">+</span>
+        </div>
+        <form class="launch-prompt-form hidden"
+          hx-post="/launch" hx-swap="none"
+          hx-on::after-request="this.classList.add('hidden'); this.reset();">
+          <input type="hidden" name="path" value="${escapeHtml(workspaceFolder)}">
+          <input type="text" name="prompt" class="launch-prompt-input"
+            placeholder="Prompt (optional)..."
+            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}">
+          <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
+        </form>
+      </div>`;
 
     for (const session of repoSessions) {
       const isActive = session.id === activeSessionId;

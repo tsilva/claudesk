@@ -17,7 +17,7 @@ export function renderSidebar(
   let html = "";
 
   // Session groups
-  for (const [repoName, repoSessions] of groups) {
+  for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     html += `<div class="repo-group">
       <div class="repo-group-header">${escapeHtml(repoName)}</div>`;
 

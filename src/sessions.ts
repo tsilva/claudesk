@@ -121,7 +121,7 @@ export class SessionManager {
 
   getSessions(): Session[] {
     return Array.from(this.sessions.values()).sort(
-      (a, b) => b.lastActivity.getTime() - a.lastActivity.getTime()
+      (a, b) => a.slug.localeCompare(b.slug)
     );
   }
 

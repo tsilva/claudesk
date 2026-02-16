@@ -56,13 +56,21 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of repos.slice(0, 20)) {
-      html += `<button class="launch-item"
-        hx-post="/launch"
-        hx-vals='${JSON.stringify({ path: repo.path })}'
-        hx-swap="none">
-        <span>${escapeHtml(repo.name)}</span>
-        <span class="launch-item-action">+</span>
-      </button>`;
+      html += `<div class="launch-item-wrapper">
+        <button class="launch-item" onclick="toggleLaunchPrompt(this)">
+          <span>${escapeHtml(repo.name)}</span>
+          <span class="launch-item-action">+</span>
+        </button>
+        <form class="launch-prompt-form hidden"
+          hx-post="/launch" hx-swap="none"
+          hx-on::after-request="this.classList.add('hidden'); this.reset();">
+          <input type="hidden" name="path" value="${escapeHtml(repo.path)}">
+          <input type="text" name="prompt" class="launch-prompt-input"
+            placeholder="Prompt (optional)..."
+            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}">
+          <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
+        </form>
+      </div>`;
     }
 
     html += `</div>`;

@@ -197,14 +197,41 @@ app.post("/sessions/:id/focus", async (c) => {
   }
 });
 
-// Launch Cursor for a repo
+// Launch Cursor for a repo and open Claude Code in its integrated terminal
 app.post("/launch", async (c) => {
   const body = await c.req.parseBody();
   const path = typeof body.path === "string" ? body.path : "";
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!path) return c.json({ error: "path required" }, 400);
 
   try {
+    // Open the folder in Cursor first
     Bun.spawn(["cursor", path]);
+
+    // Write a launch script to avoid AppleScript escaping issues
+    const tmpScript = `/tmp/claudesk-launch-${Date.now()}.sh`;
+    const claudeCmd = prompt
+      ? `claude '${prompt.replace(/'/g, "'\\''")}'`
+      : "claude";
+    await Bun.write(tmpScript, `${claudeCmd}\n`);
+
+    // Give Cursor a moment to activate, then create a new integrated terminal
+    const script = `
+      delay 2
+      tell application "System Events"
+        tell process "Cursor"
+          set frontmost to true
+          -- Create New Terminal: Ctrl+Shift+\`
+          key code 50 using {control down, shift down}
+          delay 1
+          keystroke "bash ${tmpScript}"
+          delay 0.2
+          keystroke return
+        end tell
+      end tell
+    `;
+    Bun.spawn(["osascript", "-e", script]);
+
     return c.json({ ok: true });
   } catch {
     return c.json({ error: "launch failed" }, 500);

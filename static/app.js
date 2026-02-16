@@ -178,6 +178,23 @@
     updateConnectionDot(false);
   });
 
+  // --- Launch Prompt Toggle ---
+
+  window.toggleLaunchPrompt = function (btn) {
+    var wrapper = btn.closest(".launch-item-wrapper");
+    var form = wrapper.querySelector(".launch-prompt-form");
+
+    // Close all other open forms first
+    document.querySelectorAll(".launch-prompt-form").forEach(function (f) {
+      if (f !== form) f.classList.add("hidden");
+    });
+
+    form.classList.toggle("hidden");
+    if (!form.classList.contains("hidden")) {
+      form.querySelector(".launch-prompt-input").focus();
+    }
+  };
+
   // --- Init ---
 
   // Extract current session from SSE URL

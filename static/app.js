@@ -619,7 +619,14 @@
           if (aStarred !== bStarred) return aStarred - bStarred;
           return (a.getAttribute("data-repo") || "").localeCompare(b.getAttribute("data-repo") || "");
         });
-        groups.forEach(function (g) { container.appendChild(g); });
+        var launchEl = container.querySelector(".launch-section");
+        groups.forEach(function (g) {
+          if (launchEl) {
+            container.insertBefore(g, launchEl);
+          } else {
+            container.appendChild(g);
+          }
+        });
       }
     }
 

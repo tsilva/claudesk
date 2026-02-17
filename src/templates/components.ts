@@ -424,6 +424,10 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
     promptsHtml += `</div>`;
   }
 
+  const planBodyHtml = pd.planContent
+    ? `<div class="plan-approval-body">${renderMarkdown(pd.planContent)}</div>`
+    : "";
+
   return `<div class="message message--plan-approval" id="${msg.id}" data-id="${msg.id}">
     <div class="message-content">
       <div class="plan-approval-prompt">
@@ -431,6 +435,7 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
           <span class="plan-approval-icon">P</span>
           <span class="plan-approval-title">Plan Ready for Review</span>
         </div>
+        ${planBodyHtml}
         ${promptsHtml ? `<div class="plan-approval-section-label">Requested permissions:</div>${promptsHtml}` : ""}
         <div class="plan-approval-actions">
           <button class="btn btn--plan-accept" onclick="acceptPlan('${escapeHtml(sid)}')">Accept</button>

@@ -51,6 +51,7 @@ export interface AgentMessage {
   planApprovalData?: {
     allowedPrompts: { tool: "Bash"; prompt: string }[];
     toolUseId: string;
+    planContent?: string;
     resolved?: "accepted" | "revised" | "timed_out";
     reviseFeedback?: string;
   };
@@ -78,7 +79,7 @@ export interface QuestionItem {
   multiSelect: boolean;
 }
 
-export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } | { behavior: "deny"; message: string };
+export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } | { behavior: "deny"; message: string; interrupt?: boolean };
 
 export interface PendingQuestion {
   toolUseId: string;
@@ -166,6 +167,7 @@ export interface PersistedMessage {
   planApprovalData?: {
     allowedPrompts: { tool: "Bash"; prompt: string }[];
     toolUseId: string;
+    planContent?: string;
     resolved?: "accepted" | "revised" | "timed_out";
     reviseFeedback?: string;
   };

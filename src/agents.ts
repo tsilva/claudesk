@@ -320,7 +320,7 @@ export class AgentManager {
     if (accept) {
       pending.resolve({ behavior: "allow", updatedPermissions: pending.suggestions });
     } else {
-      pending.resolve({ behavior: "deny", message: feedback || "User requested revision" });
+      pending.resolve({ behavior: "deny", message: feedback || "User requested revision", interrupt: false });
     }
   }
 
@@ -763,6 +763,7 @@ export class AgentManager {
       tool: "Bash" as const,
       prompt: String(p.prompt ?? ""),
     }));
+    const planContent = typeof input.plan === "string" ? input.plan : undefined;
 
     return new Promise((resolve) => {
       let settled = false;
@@ -804,7 +805,7 @@ export class AgentManager {
         timestamp: new Date(),
         text: "Plan ready for review",
         sessionId: session.id,
-        planApprovalData: { allowedPrompts, toolUseId },
+        planApprovalData: { allowedPrompts, toolUseId, planContent },
       };
       session.messages.push(planMsg);
       this.onMessage(planMsg, session);

@@ -300,9 +300,7 @@
       .then(function (data) {
         if (data.sessionId) {
           switchSession(data.sessionId);
-          htmx.ajax("GET", "/sessions/" + data.sessionId + "/detail", "#session-detail").then(function () {
-            showTypingIndicator();
-          });
+          htmx.ajax("GET", "/sessions/" + data.sessionId + "/detail", "#session-detail");
         }
       })
       .catch(function (err) {

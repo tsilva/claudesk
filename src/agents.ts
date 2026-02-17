@@ -75,6 +75,7 @@ export class AgentManager {
 
   async launch(cwd: string, prompt: string, model?: string): Promise<AgentSession> {
     const session = this.createSession(cwd, model);
+    await this.scanLaunchableRepos();
     await this.sendMessage(session.id, prompt);
     return session;
   }

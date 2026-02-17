@@ -502,6 +502,13 @@ ul, ol {
   color: var(--text-primary);
 }
 
+#session-header-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
 .session-header-spacer {
   flex: 1;
 }
@@ -1452,4 +1459,202 @@ button.launch-item {
 .message--error {
   border-left-color: #ef4444;
   background: rgba(239, 68, 68, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   Question Prompt (purple/violet accent)
+   -------------------------------------------------------------------------- */
+.question-prompt {
+  margin: 8px 16px;
+  padding: 12px;
+  background: rgba(167, 139, 250, 0.06);
+  border: 1px solid #a78bfa;
+  border-radius: 6px;
+}
+
+.question-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.question-prompt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #a78bfa;
+  color: #141413;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.question-prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #a78bfa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.question-block {
+  margin-bottom: 10px;
+}
+
+.question-block:last-child {
+  margin-bottom: 0;
+}
+
+.question-header-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 3px;
+  margin-bottom: 4px;
+}
+
+.question-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.question-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.question-option:hover {
+  background: var(--border-color);
+  border-color: #a78bfa;
+}
+
+.question-option.selected {
+  background: rgba(167, 139, 250, 0.12);
+  border-color: #a78bfa;
+}
+
+.question-option-label {
+  font-weight: 500;
+}
+
+.question-option-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.question-other {
+  margin-top: 6px;
+}
+
+.question-other-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.question-other-input:focus {
+  border-color: #a78bfa;
+}
+
+.question-other-input::placeholder {
+  color: var(--text-dim);
+}
+
+.question-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.btn--question {
+  background: #a78bfa;
+  color: #141413;
+  border-color: #a78bfa;
+  font-weight: 600;
+}
+
+.btn--question:hover {
+  background: #8b6ff0;
+  border-color: #8b6ff0;
+  color: #141413;
+}
+
+.btn--question:active {
+  background: #7c5ce0;
+}
+
+/* --------------------------------------------------------------------------
+   Typing Indicator
+   -------------------------------------------------------------------------- */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+  margin: 0 16px 2px;
+  border-left: 3px solid var(--msg-assistant);
+  animation: fadeIn 0.15s ease;
+}
+
+.typing-indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+.typing-indicator-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-indicator-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }

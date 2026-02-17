@@ -10,6 +10,8 @@ import type {
   LaunchableRepo,
   PendingPermission,
   PendingQuestion,
+  QuestionItem,
+  PermissionResult,
 } from "./types.ts";
 
 // --- Constants ---
@@ -140,9 +142,27 @@ export class AgentManager {
     const pending = session.pendingQuestion;
     session.pendingQuestion = null;
     session.status = "streaming";
+
+    // Show the user's answer in the conversation
+    const answerText = Object.values(answers).filter(Boolean).join(", ");
+    if (answerText) {
+      const answerMsg: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "user",
+        timestamp: new Date(),
+        text: answerText,
+        userText: answerText,
+      };
+      session.messages.push(answerMsg);
+      this.onMessage(answerMsg, session);
+    }
+
     this.onSessionChange(this.getSessions());
 
-    pending.resolve(answers);
+    pending.resolve({
+      behavior: "allow",
+      updatedInput: { ...pending.originalInput, answers },
+    });
   }
 
   stopAgent(sessionId: string): void {
@@ -385,6 +405,10 @@ export class AgentManager {
       return Promise.resolve({ behavior: "deny", message: "Session not found" });
     }
 
+    if (toolName === "AskUserQuestion") {
+      return this.handleAskUserQuestion(session, input, toolUseId);
+    }
+
     return new Promise((resolve) => {
       session.pendingPermission = {
         toolUseId,
@@ -403,6 +427,47 @@ export class AgentManager {
         text: `Permission requested: ${toolName}`,
       };
       this.onMessage(permMsg, session);
+    });
+  }
+
+  // --- Question Handler ---
+
+  private handleAskUserQuestion(
+    session: AgentSession,
+    input: Record<string, unknown>,
+    toolUseId: string,
+  ): Promise<PermissionResult> {
+    const rawQuestions = Array.isArray(input.questions) ? input.questions : [];
+    const questions: QuestionItem[] = rawQuestions.map((q: any) => ({
+      question: String(q.question ?? ""),
+      header: String(q.header ?? ""),
+      options: Array.isArray(q.options)
+        ? q.options.map((o: any) => ({
+            label: String(o.label ?? ""),
+            description: o.description ? String(o.description) : undefined,
+          }))
+        : [],
+      multiSelect: Boolean(q.multiSelect),
+    }));
+
+    return new Promise((resolve) => {
+      session.pendingQuestion = {
+        toolUseId,
+        questions,
+        originalInput: input,
+        resolve,
+      };
+      session.status = "needs_input";
+      this.onSessionChange(this.getSessions());
+
+      const firstQuestion = questions[0]?.question ?? "Question";
+      const sysMsg: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "system",
+        timestamp: new Date(),
+        text: `Question asked: ${firstQuestion}`,
+      };
+      this.onMessage(sysMsg, session);
     });
   }
 

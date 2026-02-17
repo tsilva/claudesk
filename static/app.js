@@ -5,6 +5,7 @@
   // --- State ---
   let notificationsEnabled = false;
   let currentSessionId = null;
+  var pendingAnswers = {}; // { questionText: selectedLabel(s) }
 
 
   // --- Notifications ---
@@ -50,6 +51,9 @@
       if (data.event === "permission") {
         title = data.repoName || "Agent";
         body = "Permission required";
+      } else if (data.event === "question") {
+        title = data.repoName || "Agent";
+        body = "Question needs your answer";
       }
 
       if (body) {
@@ -220,6 +224,7 @@
   window.switchSession = function (sessionId) {
     if (sessionId === currentSessionId) return;
     currentSessionId = sessionId;
+    pendingAnswers = {};
 
     var cards = document.querySelectorAll(".session-card");
     cards.forEach(function (card) {
@@ -306,6 +311,7 @@
     })
       .then(function () {
         input.value = "";
+        showTypingIndicator();
       })
       .catch(function (err) {
         console.error("Send failed:", err);
@@ -334,12 +340,118 @@
     });
   };
 
+  // --- Question Interaction ---
+
+  window.selectQuestionOption = function (btn) {
+    var sessionId = btn.getAttribute("data-session");
+    var question = btn.getAttribute("data-question");
+    var label = btn.getAttribute("data-label");
+
+    // Deselect siblings in same question block
+    var block = btn.closest(".question-block");
+    if (block) {
+      block.querySelectorAll(".question-option").forEach(function (b) {
+        b.classList.remove("selected");
+      });
+    }
+    btn.classList.add("selected");
+    pendingAnswers[question] = label;
+
+    // Single question, single select: auto-submit
+    var prompt = btn.closest(".question-prompt");
+    var blocks = prompt ? prompt.querySelectorAll(".question-block") : [];
+    if (blocks.length === 1) {
+      submitQuestionAnswers(sessionId);
+    }
+  };
+
+  window.toggleQuestionOption = function (btn) {
+    var question = btn.getAttribute("data-question");
+    var label = btn.getAttribute("data-label");
+
+    btn.classList.toggle("selected");
+
+    // Build comma-separated list of selected labels
+    var block = btn.closest(".question-block");
+    var selected = [];
+    if (block) {
+      block.querySelectorAll(".question-option.selected").forEach(function (b) {
+        selected.push(b.getAttribute("data-label"));
+      });
+    }
+    pendingAnswers[question] = selected.join(", ");
+  };
+
+  window.selectQuestionOther = function (inputEl) {
+    var sessionId = inputEl.getAttribute("data-session");
+    var question = inputEl.getAttribute("data-question");
+    var value = inputEl.value.trim();
+    if (!value) return;
+
+    // Deselect all option buttons in this block
+    var block = inputEl.closest(".question-block");
+    if (block) {
+      block.querySelectorAll(".question-option").forEach(function (b) {
+        b.classList.remove("selected");
+      });
+    }
+
+    pendingAnswers[question] = value;
+
+    // Single question: auto-submit
+    var prompt = inputEl.closest(".question-prompt");
+    var blocks = prompt ? prompt.querySelectorAll(".question-block") : [];
+    if (blocks.length === 1) {
+      submitQuestionAnswers(sessionId);
+    }
+  };
+
+  window.submitQuestionAnswers = function (sessionId) {
+    var answers = Object.assign({}, pendingAnswers);
+    pendingAnswers = {};
+
+    fetch("/api/agents/" + sessionId + "/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: answers }),
+    });
+  };
+
   window.stopAgent = function (sessionId) {
     fetch("/api/agents/" + sessionId + "/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
   };
+
+  // --- Typing Indicator ---
+
+  function showTypingIndicator() {
+    var container = document.getElementById("conversation-stream");
+    if (!container) return;
+    // Remove any existing indicator first
+    removeTypingIndicator();
+    var indicator = document.createElement("div");
+    indicator.className = "typing-indicator";
+    indicator.id = "typing-indicator";
+    indicator.innerHTML =
+      '<div class="typing-indicator-dot"></div>' +
+      '<div class="typing-indicator-dot"></div>' +
+      '<div class="typing-indicator-dot"></div>';
+    container.prepend(indicator);
+  }
+
+  function removeTypingIndicator() {
+    var indicator = document.getElementById("typing-indicator");
+    if (indicator) indicator.remove();
+  }
+
+  // Remove typing indicator when first agent response arrives
+  document.body.addEventListener("htmx:sseMessage", function (e) {
+    if (e.detail.type === "stream-append") {
+      removeTypingIndicator();
+    }
+  });
 
   // --- Elapsed Timer ---
 

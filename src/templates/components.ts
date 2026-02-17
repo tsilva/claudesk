@@ -1,4 +1,4 @@
-import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission } from "../types.ts";
+import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission, PendingQuestion } from "../types.ts";
 import { renderMarkdown } from "../markdown.ts";
 
 // --- Escaping ---
@@ -119,6 +119,18 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
   }
 }
 
+// --- Session Header Status ---
+
+export function renderSessionHeaderStatus(session: AgentSession): string {
+  const isActive = session.status === "streaming" || session.status === "starting";
+  return `${statusBadge(session.status)}
+    <span class="elapsed-timer"
+          data-last-activity="${session.lastActivity.toISOString()}"
+          data-status="${session.status}"></span>
+    <span class="session-header-spacer"></span>
+    ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}`;
+}
+
 // --- Session Stats ---
 
 export function renderSessionStats(session: AgentSession): string {
@@ -157,6 +169,63 @@ export function renderPermissionPrompt(permission: PendingPermission, sessionId:
       <button class="btn btn--primary" onclick="approvePermission('${sessionId}')">Allow</button>
       <button class="btn" onclick="denyPermission('${sessionId}')">Deny</button>
     </div>
+  </div>`;
+}
+
+// --- Question Prompt ---
+
+export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string): string {
+  const singleQuestionSingleSelect = pending.questions.length === 1 && !pending.questions[0].multiSelect;
+
+  let questionsHtml = "";
+  for (let i = 0; i < pending.questions.length; i++) {
+    const q = pending.questions[i];
+    const qIndex = i;
+
+    let optionsHtml = "";
+    for (const opt of q.options) {
+      const dataAttrs = `data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-label="${escapeHtml(opt.label)}" data-index="${qIndex}"`;
+      if (q.multiSelect) {
+        optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="toggleQuestionOption(this)">
+          <span class="question-option-label">${escapeHtml(opt.label)}</span>
+          ${opt.description ? `<span class="question-option-desc">${escapeHtml(opt.description)}</span>` : ""}
+        </button>`;
+      } else {
+        optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="selectQuestionOption(this)">
+          <span class="question-option-label">${escapeHtml(opt.label)}</span>
+          ${opt.description ? `<span class="question-option-desc">${escapeHtml(opt.description)}</span>` : ""}
+        </button>`;
+      }
+    }
+
+    // "Other" free-text input (always rendered per SDK spec)
+    const otherHtml = `<div class="question-other">
+      <input type="text" class="question-other-input" placeholder="Other..."
+        data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-index="${qIndex}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();selectQuestionOther(this)}">
+    </div>`;
+
+    questionsHtml += `<div class="question-block" data-index="${qIndex}">
+      ${q.header ? `<span class="question-header-chip">${escapeHtml(q.header)}</span>` : ""}
+      <div class="question-text">${escapeHtml(q.question)}</div>
+      <div class="question-options">${optionsHtml}</div>
+      ${otherHtml}
+    </div>`;
+  }
+
+  const submitBtn = singleQuestionSingleSelect
+    ? ""
+    : `<div class="question-actions">
+        <button type="button" class="btn btn--question" onclick="submitQuestionAnswers('${escapeHtml(sessionId)}')">Submit</button>
+      </div>`;
+
+  return `<div class="question-prompt">
+    <div class="question-prompt-header">
+      <span class="question-prompt-icon">?</span>
+      <span class="question-prompt-title">Question</span>
+    </div>
+    ${questionsHtml}
+    ${submitBtn}
   </div>`;
 }
 

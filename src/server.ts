@@ -6,7 +6,7 @@ import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
-import { renderMessage, renderSessionStats, renderPermissionPrompt } from "./templates/components.ts";
+import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderPermissionPrompt, renderQuestionPrompt } from "./templates/components.ts";
 
 const PORT = 3456;
 
@@ -48,6 +48,22 @@ const agentManager = new AgentManager(
       if (session.pendingPermission) {
         const html = renderPermissionPrompt(session.pendingPermission, session.id);
         broadcast("permission-request", html, session.id);
+        broadcast("notify", JSON.stringify({
+          event: "permission",
+          repoName: session.repoName,
+          sessionId: session.id,
+        }));
+      }
+    } else if (msg.type === "system" && msg.text?.startsWith("Question asked:")) {
+      // Send question prompt to viewers of this session
+      if (session.pendingQuestion) {
+        const html = renderQuestionPrompt(session.pendingQuestion, session.id);
+        broadcast("question-request", html, session.id);
+        broadcast("notify", JSON.stringify({
+          event: "question",
+          repoName: session.repoName,
+          sessionId: session.id,
+        }));
       }
     } else {
       const html = renderMessage(msg);
@@ -64,6 +80,14 @@ const agentManager = new AgentManager(
   // onSessionChange callback
   (_sessions: AgentSession[]) => {
     broadcastSidebar();
+    // Update session header status for viewers of each session
+    for (const client of clients.values()) {
+      if (!client.sessionId) continue;
+      const session = agentManager.getSession(client.sessionId);
+      if (!session) continue;
+      const html = renderSessionHeaderStatus(session);
+      client.send("session-status", html);
+    }
   }
 );
 
@@ -150,7 +174,7 @@ app.post("/sessions/:id/focus", async (c) => {
   try {
     const proc = Bun.spawn([
       "/Users/tsilva/.claude/focus-window.sh",
-      session.repoName,
+      session.cwd,
     ]);
     await proc.exited;
     return c.json({ ok: true });
@@ -219,6 +243,8 @@ app.post("/api/agents/:id/answer", async (c) => {
     const body = await c.req.json<{ answers: Record<string, string> }>();
 
     agentManager.answerQuestion(id, body.answers);
+    // Clear the question prompt for viewers
+    broadcast("question-request", "", id);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);

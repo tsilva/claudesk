@@ -1,9 +1,7 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, statusBadge, renderSessionStats, renderMessage } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
-  const isActive = session.status === "streaming" || session.status === "starting";
-
   // Render initial messages inline
   const messagesHtml = messages
     .slice()
@@ -14,20 +12,14 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
 
   return `<div class="session-detail" data-session-id="${session.id}">
     <div class="session-header">
-      <div>
-        <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
-        <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
-        ${statusBadge(session.status)}
-        <span class="elapsed-timer"
-              data-last-activity="${session.lastActivity.toISOString()}"
-              data-status="${session.status}"></span>
-      </div>
-      <div class="session-header-spacer"></div>
-      <div>
-        ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}
+      <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
+      <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
+      <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
+        ${renderSessionHeaderStatus(session)}
       </div>
     </div>
     <div id="permission-prompt-area" sse-swap="permission-request" hx-swap="innerHTML"></div>
+    <div id="question-prompt-area" sse-swap="question-request" hx-swap="innerHTML"></div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>

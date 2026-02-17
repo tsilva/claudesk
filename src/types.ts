@@ -51,12 +51,20 @@ export interface QuestionOption {
   description?: string;
 }
 
-export interface PendingQuestion {
-  toolUseId: string;
+export interface QuestionItem {
   question: string;
+  header: string;
   options: QuestionOption[];
   multiSelect: boolean;
-  resolve: (answers: Record<string, string>) => void;
+}
+
+export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown> } | { behavior: "deny"; message: string };
+
+export interface PendingQuestion {
+  toolUseId: string;
+  questions: QuestionItem[];
+  originalInput: Record<string, unknown>;
+  resolve: (result: PermissionResult) => void;
 }
 
 // --- Agent Session ---

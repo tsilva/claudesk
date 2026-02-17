@@ -106,8 +106,10 @@ export class AgentManager {
       cwd: session.cwd,
       model: session.model,
       abortController,
-      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) =>
-        this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID),
+      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) => {
+        console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
+        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID);
+      },
     };
     if (session.sdkSessionId) {
       options.resume = session.sdkSessionId;
@@ -437,6 +439,7 @@ export class AgentManager {
     input: Record<string, unknown>,
     toolUseId: string,
   ): Promise<PermissionResult> {
+    console.log(`[DEBUG handleAskUserQuestion] session=${session.id} questions=${JSON.stringify(input.questions).slice(0, 200)}`);
     const rawQuestions = Array.isArray(input.questions) ? input.questions : [];
     const questions: QuestionItem[] = rawQuestions.map((q: any) => ({
       question: String(q.question ?? ""),
@@ -468,6 +471,7 @@ export class AgentManager {
         text: `Question asked: ${firstQuestion}`,
       };
       this.onMessage(sysMsg, session);
+      console.log(`[DEBUG handleAskUserQuestion] dispatched system message for session=${session.id}`);
     });
   }
 

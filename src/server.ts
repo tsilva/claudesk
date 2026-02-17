@@ -43,6 +43,9 @@ function broadcastSidebar() {
 const agentManager = new AgentManager(
   // onMessage callback
   (msg: AgentMessage, session: AgentSession) => {
+    if (msg.type === "system") {
+      console.log(`[DEBUG onMessage] system msg: "${msg.text}" session=${session.id}`);
+    }
     if (msg.type === "system" && msg.text?.startsWith("Permission requested:")) {
       // Send permission prompt to viewers of this session
       if (session.pendingPermission) {
@@ -57,6 +60,8 @@ const agentManager = new AgentManager(
     } else if (msg.type === "system" && msg.text?.startsWith("Question asked:")) {
       // Send question prompt to viewers of this session
       if (session.pendingQuestion) {
+        const clientCount = Array.from(clients.values()).filter(c => c.sessionId === session.id).length;
+        console.log(`[DEBUG onMessage] broadcasting question-request to ${clientCount} clients for session=${session.id}`);
         const html = renderQuestionPrompt(session.pendingQuestion, session.id);
         broadcast("question-request", html, session.id);
         broadcast("notify", JSON.stringify({
@@ -183,6 +188,60 @@ app.post("/sessions/:id/focus", async (c) => {
   }
 });
 
+// Focus the claudesk browser window (via AeroSpace or fallback to open)
+app.post("/api/focus-dashboard", async (c) => {
+  const body = await c.req.json<{ sessionId?: string }>().catch(() => ({}));
+  const sessionId = (body as any)?.sessionId;
+  const AEROSPACE = "/opt/homebrew/bin/aerospace";
+  const BROWSER_APPS = [
+    "safari", "google chrome", "arc", "firefox",
+    "brave browser", "microsoft edge", "chromium", "orion",
+  ];
+
+  try {
+    const proc = Bun.spawn([
+      AEROSPACE, "list-windows", "--all",
+      "--format", "%{window-id}|%{app-name}|%{window-title}|%{workspace}",
+    ]);
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+
+    const lines = output.trim().split("\n").filter(Boolean);
+    let match: { windowId: string; workspace: string } | null = null;
+
+    for (const line of lines) {
+      const [windowId, appName, windowTitle, workspace] = line.split("|");
+      if (
+        BROWSER_APPS.includes(appName.toLowerCase()) &&
+        windowTitle.toLowerCase().includes("claudesk")
+      ) {
+        match = { windowId: windowId.trim(), workspace: workspace.trim() };
+        break;
+      }
+    }
+
+    if (match) {
+      if (match.workspace) {
+        const ws = Bun.spawn([AEROSPACE, "workspace", match.workspace]);
+        await ws.exited;
+      }
+      const focus = Bun.spawn([AEROSPACE, "focus", "--window-id", match.windowId]);
+      await focus.exited;
+      return c.json({ ok: true, action: "focused" });
+    }
+  } catch {
+    // AeroSpace not available, fall through to open
+  }
+
+  // Fallback: open in default browser
+  const url = sessionId
+    ? `http://localhost:${PORT}/#session=${sessionId}`
+    : `http://localhost:${PORT}/`;
+  const open = Bun.spawn(["open", url]);
+  await open.exited;
+  return c.json({ ok: true, action: "opened" });
+});
+
 // Dismiss a session
 app.delete("/sessions/:id", async (c) => {
   const id = c.req.param("id");
@@ -249,6 +308,40 @@ app.post("/api/agents/:id/answer", async (c) => {
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
   }
+});
+
+// DEBUG: Test question SSE delivery independently of SDK
+app.post("/api/debug/test-question", async (c) => {
+  const body = await c.req.json<{ sessionId: string }>().catch(() => ({ sessionId: "" }));
+  const sessionId = body.sessionId;
+  if (!sessionId) return c.json({ error: "sessionId required" }, 400);
+
+  const session = agentManager.getSession(sessionId);
+  if (!session) return c.json({ error: "session not found" }, 404);
+
+  const fakeQuestion = {
+    toolUseId: "debug-test",
+    questions: [
+      {
+        question: "Which language do you prefer?",
+        header: "Language",
+        options: [
+          { label: "TypeScript", description: "Typed JavaScript" },
+          { label: "Python", description: "General purpose" },
+          { label: "Rust", description: "Systems programming" },
+        ],
+        multiSelect: false,
+      },
+    ],
+    originalInput: {},
+    resolve: () => {},
+  };
+
+  const html = renderQuestionPrompt(fakeQuestion as any, sessionId);
+  const clientCount = Array.from(clients.values()).filter(cl => cl.sessionId === sessionId).length;
+  console.log(`[DEBUG test-question] broadcasting to ${clientCount} clients for session=${sessionId}`);
+  broadcast("question-request", html, sessionId);
+  return c.json({ ok: true, clientCount });
 });
 
 // Stop an agent

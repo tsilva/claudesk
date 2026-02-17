@@ -64,10 +64,15 @@
         });
 
         n.onclick = function () {
-          window.focus();
-          if (data.sessionId) {
-            switchSession(data.sessionId);
-          }
+          fetch("/api/focus-dashboard", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId: data.sessionId || null }),
+          }).then(function () {
+            if (data.sessionId) {
+              switchSession(data.sessionId, { skipEditorFocus: true });
+            }
+          });
           n.close();
         };
 
@@ -173,6 +178,15 @@
     }
   });
 
+  // --- DEBUG: Log SSE events for question/permission ---
+
+  document.body.addEventListener("htmx:sseMessage", function (e) {
+    var type = e.detail.type;
+    if (type === "question-request" || type === "permission-request") {
+      console.log("[DEBUG SSE] Received event: " + type + " dataLength=" + (e.detail.data || "").length);
+    }
+  });
+
   // --- SSE Dedup: prevent duplicate messages in conversation stream ---
 
   document.body.addEventListener("htmx:sseBeforeMessage", function (e) {
@@ -221,7 +235,7 @@
 
   // --- Session Switching ---
 
-  window.switchSession = function (sessionId) {
+  window.switchSession = function (sessionId, opts) {
     if (sessionId === currentSessionId) return;
     currentSessionId = sessionId;
     pendingAnswers = {};
@@ -237,8 +251,10 @@
 
     reconnectSSE(sessionId);
 
-    // Focus the corresponding Cursor window
-    fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
+    // Focus the corresponding Cursor window (unless explicitly skipped)
+    if (!opts || !opts.skipEditorFocus) {
+      fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
+    }
   };
 
   function reconnectSSE(sessionId) {
@@ -284,7 +300,9 @@
       .then(function (data) {
         if (data.sessionId) {
           switchSession(data.sessionId);
-          htmx.ajax("GET", "/sessions/" + data.sessionId + "/detail", "#session-detail");
+          htmx.ajax("GET", "/sessions/" + data.sessionId + "/detail", "#session-detail").then(function () {
+            showTypingIndicator();
+          });
         }
       })
       .catch(function (err) {
@@ -328,6 +346,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allow: true }),
+    }).then(function () {
+      showTypingIndicator();
     });
   };
 
@@ -337,6 +357,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allow: false, message: message || "User denied" }),
+    }).then(function () {
+      showTypingIndicator();
     });
   };
 
@@ -414,6 +436,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers: answers }),
+    }).then(function () {
+      showTypingIndicator();
     });
   };
 
@@ -495,6 +519,18 @@
     var match = sseUrl.match(/session=([^&]+)/);
     if (match) {
       currentSessionId = match[1];
+    }
+  }
+
+  // Hash-based session routing (e.g. #session=<id> from open fallback)
+  var hash = window.location.hash;
+  if (hash) {
+    var sessionMatch = hash.match(/session=([^&]+)/);
+    if (sessionMatch && sessionMatch[1]) {
+      setTimeout(function () {
+        switchSession(sessionMatch[1], { skipEditorFocus: true });
+        htmx.ajax("GET", "/sessions/" + sessionMatch[1] + "/detail", "#session-detail");
+      }, 200);
     }
   }
 })();

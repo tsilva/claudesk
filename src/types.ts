@@ -79,7 +79,7 @@ export interface QuestionItem {
   multiSelect: boolean;
 }
 
-export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } | { behavior: "deny"; message: string; interrupt?: boolean };
+export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown>; updatedPermissions?: PermissionUpdate[] } | { behavior: "deny"; message: string; interrupt?: boolean };
 
 export interface PendingQuestion {
   toolUseId: string;
@@ -93,7 +93,7 @@ export interface PendingPlanApproval {
   toolUseId: string;
   allowedPrompts: { tool: "Bash"; prompt: string }[];
   originalInput: Record<string, unknown>;
-  suggestions?: unknown[];
+  suggestions?: PermissionUpdate[];
   resolve: (result: PermissionResult) => void;
   timeoutId: ReturnType<typeof setTimeout>;
 }
@@ -101,6 +101,16 @@ export interface PendingPlanApproval {
 // --- Permission Mode ---
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'delegate' | 'dontAsk';
+
+export type PermissionUpdateDestination = 'userSettings' | 'projectSettings' | 'localSettings' | 'session' | 'cliArg';
+
+export type PermissionUpdate =
+  | { type: 'setMode'; mode: PermissionMode; destination: PermissionUpdateDestination }
+  | { type: 'addRules'; rules: { toolName: string; ruleContent?: string }[]; behavior: 'allow' | 'deny' | 'ask'; destination: PermissionUpdateDestination }
+  | { type: 'replaceRules'; rules: { toolName: string; ruleContent?: string }[]; behavior: 'allow' | 'deny' | 'ask'; destination: PermissionUpdateDestination }
+  | { type: 'removeRules'; rules: { toolName: string; ruleContent?: string }[]; behavior: 'allow' | 'deny' | 'ask'; destination: PermissionUpdateDestination }
+  | { type: 'addDirectories'; directories: string[]; destination: PermissionUpdateDestination }
+  | { type: 'removeDirectories'; directories: string[]; destination: PermissionUpdateDestination };
 
 // --- Agent Session ---
 

@@ -15,6 +15,7 @@ import type {
   QuestionItem,
   PermissionResult,
   PermissionMode,
+  PermissionUpdate,
 } from "./types.ts";
 import {
   ensureDataDir,
@@ -75,6 +76,26 @@ async function getRepoGitStatus(repoPath: string): Promise<RepoGitStatus> {
 
 type MessageCallback = (msg: AgentMessage, session: AgentSession) => void;
 type SessionChangeCallback = (sessions: AgentSession[]) => void;
+
+// --- Plan Mode Helpers ---
+
+function buildExitPlanPermissions(suggestions?: PermissionUpdate[]): PermissionUpdate[] {
+  const setModeDefault: PermissionUpdate = {
+    type: 'setMode',
+    mode: 'default',
+    destination: 'session',
+  };
+
+  if (!suggestions || suggestions.length === 0) {
+    return [setModeDefault];
+  }
+
+  if (suggestions.some((s) => s.type === 'setMode')) {
+    return suggestions;
+  }
+
+  return [...suggestions, setModeDefault];
+}
 
 // --- AgentManager ---
 
@@ -210,7 +231,7 @@ export class AgentManager {
       settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
-        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID, opts.suggestions);
+        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID, opts.suggestions as PermissionUpdate[] | undefined);
       },
     };
     if (session.permissionMode === 'bypassPermissions') {
@@ -318,7 +339,7 @@ export class AgentManager {
     this.onSessionChange(this.getSessions());
 
     if (accept) {
-      pending.resolve({ behavior: "allow", updatedPermissions: pending.suggestions });
+      pending.resolve({ behavior: "allow", updatedPermissions: buildExitPlanPermissions(pending.suggestions) });
     } else {
       pending.resolve({ behavior: "deny", message: feedback || "User requested revision", interrupt: false });
     }
@@ -611,7 +632,7 @@ export class AgentManager {
     toolName: string,
     input: Record<string, unknown>,
     toolUseId: string,
-    suggestions?: unknown[],
+    suggestions?: PermissionUpdate[],
   ): Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -756,7 +777,7 @@ export class AgentManager {
     session: AgentSession,
     input: Record<string, unknown>,
     toolUseId: string,
-    suggestions?: unknown[],
+    suggestions?: PermissionUpdate[],
   ): Promise<PermissionResult> {
     const rawPrompts = Array.isArray(input.allowedPrompts) ? input.allowedPrompts : [];
     const allowedPrompts = rawPrompts.map((p: any) => ({

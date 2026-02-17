@@ -523,6 +523,21 @@
     pendingAnswers = {};
     seenNotifications.delete("question:" + sessionId);
 
+    // Optimistically collapse the question UI immediately
+    var answerValues = Object.values(answers).filter(Boolean).join(', ');
+    var badgeText = answerValues ? 'Answered: ' + answerValues : 'Answered';
+    var questionMsgs = document.querySelectorAll('#conversation-stream .message--question');
+    questionMsgs.forEach(function(el) {
+      var questionTextEl = el.querySelector('.question-text');
+      var firstQ = questionTextEl ? questionTextEl.textContent.trim() : 'Question';
+      el.className = 'message message--system';
+      el.innerHTML = '<div class="message-content question-resolved">' +
+        '<span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span>' +
+        '<span class="question-resolved-text">' + escapeHtmlClient(firstQ) + '</span>' +
+        '<span class="question-badge question-badge--answered">' + escapeHtmlClient(badgeText) + '</span>' +
+        '</div>';
+    });
+
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/answer", {
       method: "POST",

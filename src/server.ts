@@ -136,6 +136,24 @@ app.get("/sessions/:id/detail", async (c) => {
   return c.html(renderSessionDetail(session, messages));
 });
 
+// Focus the Cursor window for a session's repo
+app.post("/sessions/:id/focus", async (c) => {
+  const id = c.req.param("id");
+  const session = agentManager.getSession(id);
+  if (!session) return c.json({ error: "not found" }, 404);
+
+  try {
+    const proc = Bun.spawn([
+      "/Users/tsilva/.claude/focus-window.sh",
+      session.repoName,
+    ]);
+    await proc.exited;
+    return c.json({ ok: true });
+  } catch {
+    return c.json({ error: "focus failed" }, 500);
+  }
+});
+
 // Dismiss a session
 app.delete("/sessions/:id", async (c) => {
   const id = c.req.param("id");

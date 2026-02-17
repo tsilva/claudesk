@@ -282,6 +282,9 @@
     if (target) target.classList.add("active");
 
     reconnectSSE(sessionId);
+
+    // Focus the corresponding Cursor window
+    fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
   };
 
   function reconnectSSE(sessionId) {

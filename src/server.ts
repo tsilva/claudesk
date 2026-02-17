@@ -55,9 +55,8 @@ const agentManager = new AgentManager(
         broadcast("stream-append", html, session.id);
       }
     }
-    // Update sidebar + stats on meaningful messages
+    // Update stats on meaningful messages (sidebar is handled by onSessionChange)
     if (msg.type === "user" || msg.type === "assistant" || msg.type === "result") {
-      broadcastSidebar();
       const statsHtml = renderSessionStats(session);
       broadcast("session-stats", statsHtml, session.id);
     }
@@ -107,6 +106,12 @@ app.get("/events", (c) => {
     };
 
     clients.set(clientId, client);
+
+    // Push initial sidebar so client is never stale
+    const sessions = agentManager.getSessions();
+    const repos = agentManager.getLaunchableRepos();
+    const sidebarHtml = renderSidebar(sessions, repos, sessionId ?? undefined);
+    client.send("sidebar", sidebarHtml);
 
     // Keep-alive ping every 15s
     const keepAlive = setInterval(() => {

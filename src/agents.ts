@@ -195,10 +195,15 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
-    this.stopAgent(sessionId);
+    const controller = this.abortControllers.get(sessionId);
+    if (controller) controller.abort();
+    const q = this.queries.get(sessionId);
+    if (q) q.close();
+
     this.sessions.delete(sessionId);
     this.queries.delete(sessionId);
     this.abortControllers.delete(sessionId);
+
     this.onSessionChange(this.getSessions());
     return true;
   }
@@ -374,6 +379,7 @@ export class AgentManager {
 
         this.onSessionChange(this.getSessions());
         await this.scanLaunchableRepos();
+        this.onSessionChange(this.getSessions());
         break;
       }
 

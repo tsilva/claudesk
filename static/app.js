@@ -238,20 +238,6 @@
       }
     }
 
-    if (e.detail.target && e.detail.target.id === "sidebar") {
-      if (currentSessionId) {
-        var cards = e.detail.target.querySelectorAll(".session-card");
-        cards.forEach(function (card) {
-          card.classList.remove("active");
-        });
-        var active = e.detail.target.querySelector(
-          '[hx-get="/sessions/' + currentSessionId + '/detail"]'
-        );
-        if (active) active.classList.add("active");
-      }
-      reapplyFilter();
-      restoreLaunchFormState();
-    }
   });
 
   // --- Session Dismiss ---

@@ -140,6 +140,7 @@
     var count = sidebar ? sidebar.querySelectorAll(".status-dot.needs_input").length : 0;
     badge.textContent = count;
     btn.disabled = count === 0;
+    btn.classList.toggle("hidden", count === 0);
   }
 
   // --- Sidebar Filter ---

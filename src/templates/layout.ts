@@ -44,7 +44,7 @@ export function renderLayout(
         <div class="sidebar-filter">
           <input type="text" id="sidebar-filter-input" class="sidebar-filter-input"
             placeholder="Filter..." autocomplete="off" spellcheck="false">
-          <button class="needs-attention-btn" id="needs-attention-btn"
+          <button class="needs-attention-btn hidden" id="needs-attention-btn"
             onclick="cycleNeedsInput()" title="Next session needing input" disabled>
             <span class="needs-attention-icon">!</span>
             <span class="needs-attention-badge" id="needs-attention-badge">0</span>

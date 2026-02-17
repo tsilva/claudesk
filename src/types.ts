@@ -69,6 +69,10 @@ export interface PendingQuestion {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+// --- Permission Mode ---
+
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'delegate' | 'dontAsk';
+
 // --- Agent Session ---
 
 export interface AgentSession {
@@ -86,9 +90,18 @@ export interface AgentSession {
   outputTokens: number;
   turnCount: number;
   model: string;
+  permissionMode: PermissionMode;
   pendingQuestion: PendingQuestion | null;
   pendingPermission: PendingPermission | null;
   messages: AgentMessage[];
+}
+
+// --- Git Status ---
+
+export interface RepoGitStatus {
+  uncommitted: number;
+  unpulled: number;
+  unpushed: number;
 }
 
 // --- Launchable Repos ---
@@ -96,5 +109,5 @@ export interface AgentSession {
 export interface LaunchableRepo {
   name: string;
   path: string;
-  pendingCommits?: number;
+  gitStatus?: RepoGitStatus;
 }

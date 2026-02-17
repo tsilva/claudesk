@@ -6,7 +6,7 @@ import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
-import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderPermissionPrompt, renderQuestionPrompt } from "./templates/components.ts";
+import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderPermissionPrompt, renderQuestionPrompt, renderTurnCompleteFooter } from "./templates/components.ts";
 
 const PORT = 3456;
 
@@ -71,6 +71,9 @@ const agentManager = new AgentManager(
           sessionId: session.id,
         }));
       }
+    } else if (msg.type === "result" && !msg.isError) {
+      const footerHtml = renderTurnCompleteFooter(msg);
+      broadcast("turn-complete", footerHtml, session.id);
     } else {
       const html = renderMessage(msg);
       if (html) {
@@ -266,11 +269,11 @@ app.delete("/sessions/:id", async (c) => {
 // Create a new session (no prompt required)
 app.post("/api/agents/launch", async (c) => {
   try {
-    const body = await c.req.json<{ cwd: string; model?: string }>();
-    const { cwd, model } = body;
+    const body = await c.req.json<{ cwd: string; model?: string; permissionMode?: string }>();
+    const { cwd, model, permissionMode } = body;
     if (!cwd) return c.json({ error: "cwd required" }, 400);
 
-    const session = agentManager.createSession(cwd, model);
+    const session = agentManager.createSession(cwd, model, permissionMode as any);
     return c.json({ ok: true, sessionId: session.id });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "launch failed" }, 500);
@@ -353,6 +356,18 @@ app.post("/api/debug/test-question", async (c) => {
   console.log(`[DEBUG test-question] broadcasting to ${clientCount} clients for session=${sessionId}`);
   broadcast("question-request", html, sessionId);
   return c.json({ ok: true, clientCount });
+});
+
+// Change permission mode
+app.post("/api/agents/:id/mode", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const { mode } = await c.req.json<{ mode: string }>();
+    await agentManager.setPermissionMode(id, mode as any);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
 });
 
 // Stop an agent

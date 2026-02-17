@@ -375,6 +375,11 @@
     var btn = form.querySelector(".message-send-btn");
     if (btn) btn.disabled = true;
 
+    showTypingIndicator();
+
+    var container = document.getElementById("conversation-stream");
+    if (container) container.scrollTop = 0;
+
     fetch("/api/agents/" + sessionId + "/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -382,10 +387,10 @@
     })
       .then(function () {
         input.value = "";
-        showTypingIndicator();
       })
       .catch(function (err) {
         console.error("Send failed:", err);
+        removeTypingIndicator();
       })
       .finally(function () {
         input.disabled = false;
@@ -395,23 +400,25 @@
   };
 
   window.approvePermission = function (sessionId) {
+    showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allow: true }),
-    }).then(function () {
-      showTypingIndicator();
+    }).catch(function () {
+      removeTypingIndicator();
     });
   };
 
   window.denyPermission = function (sessionId) {
     var message = prompt("Denial reason (optional):");
+    showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allow: false, message: message || "User denied" }),
-    }).then(function () {
-      showTypingIndicator();
+    }).catch(function () {
+      removeTypingIndicator();
     });
   };
 
@@ -485,12 +492,13 @@
     var answers = Object.assign({}, pendingAnswers);
     pendingAnswers = {};
 
+    showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers: answers }),
-    }).then(function () {
-      showTypingIndicator();
+    }).catch(function () {
+      removeTypingIndicator();
     });
   };
 
@@ -503,6 +511,36 @@
 
   window.focusEditor = function (sessionId) {
     fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
+  };
+
+  // --- Permission Mode Cycling ---
+
+  var MODE_ORDER = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
+  var MODE_LABELS = {
+    default: 'Default', plan: 'Plan', acceptEdits: 'Accept Edits',
+    bypassPermissions: 'Bypass', delegate: 'Delegate', dontAsk: "Don't Ask"
+  };
+
+  window.cycleMode = function (sessionId) {
+    var btn = document.querySelector('.mode-cycle-btn');
+    if (!btn) return;
+
+    var currentLabel = btn.textContent.replace(/\s*\u21bb\s*$/, '').trim();
+    var currentMode = 'default';
+    for (var k in MODE_LABELS) {
+      if (MODE_LABELS[k] === currentLabel) { currentMode = k; break; }
+    }
+    var idx = MODE_ORDER.indexOf(currentMode);
+    var nextMode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
+
+    // Optimistic UI update
+    btn.textContent = MODE_LABELS[nextMode] + ' \u21bb';
+
+    fetch('/api/agents/' + sessionId + '/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: nextMode })
+    });
   };
 
   // --- Typing Indicator ---
@@ -527,11 +565,36 @@
     if (indicator) indicator.remove();
   }
 
-  // Remove typing indicator when first agent response arrives
+  // Remove typing indicator when first agent response arrives (skip user messages)
   document.body.addEventListener("htmx:sseMessage", function (e) {
     if (e.detail.type === "stream-append") {
-      removeTypingIndicator();
+      var data = e.detail.data || "";
+      var temp = document.createElement("div");
+      temp.innerHTML = data;
+      var root = temp.firstElementChild;
+      if (!root || !root.classList.contains("message--user")) {
+        removeTypingIndicator();
+      }
     }
+  });
+
+  // Handle turn-complete: inject stats footer into last assistant message
+  document.body.addEventListener("htmx:sseMessage", function (e) {
+    if (e.detail.type !== "turn-complete") return;
+    var container = document.getElementById("conversation-stream");
+    if (!container) return;
+
+    var lastAssistant = container.querySelector(".message--assistant");
+    if (lastAssistant) {
+      var content = lastAssistant.querySelector(".message-content");
+      if (content) {
+        // Remove any existing footer first
+        var existing = content.querySelector(".turn-complete-footer");
+        if (existing) existing.remove();
+        content.insertAdjacentHTML("beforeend", e.detail.data);
+      }
+    }
+    removeTypingIndicator();
   });
 
   // --- Elapsed Timer ---

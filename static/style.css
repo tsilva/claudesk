@@ -503,7 +503,7 @@ ul, ol {
   color: var(--text-primary);
 }
 
-.pending-commits-badge {
+.git-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -513,11 +513,27 @@ ul, ol {
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
   border-radius: 8px;
   flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.git-badge--uncommitted {
+  color: var(--status-amber);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.git-badge--unpulled {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+}
+
+.git-badge--unpushed {
+  color: var(--status-green);
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.3);
 }
 
 .star-btn {
@@ -1458,6 +1474,25 @@ button.launch-item {
   cursor: not-allowed;
 }
 
+.mode-cycle-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.mode-cycle-btn:hover {
+  background: var(--border-color);
+  color: var(--text-primary);
+  border-color: var(--accent-orange);
+}
+
 .message-send-btn {
   flex-shrink: 0;
 }
@@ -1753,4 +1788,118 @@ button.launch-item {
     opacity: 1;
     transform: translateY(-3px);
   }
+}
+
+/* --------------------------------------------------------------------------
+   Turn Complete Footer (inline stats on last assistant message)
+   -------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------
+   Task / Todo Tool Blocks
+   -------------------------------------------------------------------------- */
+.task-tool-block {
+  margin-top: 6px;
+  border-left: 2px solid var(--status-green);
+  padding-left: 8px;
+}
+
+.task-list-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.task-list-icon {
+  color: var(--status-green);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.task-list-title {
+  color: var(--accent-orange);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.task-list-count {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.task-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.task-status {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.task-status--pending {
+  color: var(--text-dim);
+}
+
+.task-status--in-progress {
+  color: var(--status-orange);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.task-status--completed {
+  color: var(--status-green);
+}
+
+.task-item-subject {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.task-item-subject--done {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+
+.task-item-active {
+  font-size: 11px;
+  color: var(--status-orange);
+  font-style: italic;
+}
+
+.task-tool-raw {
+  margin-top: 4px;
+}
+
+.task-tool-raw summary {
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-dim);
+  user-select: none;
+  outline: none;
+}
+
+.task-tool-raw summary:hover {
+  color: var(--text-secondary);
+}
+
+.turn-complete-footer {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
 }

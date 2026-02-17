@@ -8,10 +8,12 @@ import type {
   AgentStatus,
   ContentBlock,
   LaunchableRepo,
+  RepoGitStatus,
   PendingPermission,
   PendingQuestion,
   QuestionItem,
   PermissionResult,
+  PermissionMode,
 } from "./types.ts";
 
 // --- Constants ---
@@ -22,9 +24,9 @@ const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- Git Helpers ---
 
-async function getPendingCommitCount(repoPath: string): Promise<number> {
+async function gitCount(repoPath: string, args: string[]): Promise<number> {
   try {
-    const proc = Bun.spawn(["git", "rev-list", "@{upstream}..HEAD", "--count"], {
+    const proc = Bun.spawn(["git", ...args], {
       cwd: repoPath, stdout: "pipe", stderr: "pipe",
     });
     const output = await new Response(proc.stdout).text();
@@ -32,6 +34,34 @@ async function getPendingCommitCount(repoPath: string): Promise<number> {
     const count = parseInt(output.trim(), 10);
     return isNaN(count) ? 0 : count;
   } catch { return 0; }
+}
+
+async function getUncommittedCount(repoPath: string): Promise<number> {
+  try {
+    const proc = Bun.spawn(["git", "status", "--porcelain"], {
+      cwd: repoPath, stdout: "pipe", stderr: "pipe",
+    });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    return output.trim() ? output.trim().split("\n").length : 0;
+  } catch { return 0; }
+}
+
+async function getUnpulledCount(repoPath: string): Promise<number> {
+  return gitCount(repoPath, ["rev-list", "HEAD..@{upstream}", "--count"]);
+}
+
+async function getUnpushedCount(repoPath: string): Promise<number> {
+  return gitCount(repoPath, ["rev-list", "@{upstream}..HEAD", "--count"]);
+}
+
+async function getRepoGitStatus(repoPath: string): Promise<RepoGitStatus> {
+  const [uncommitted, unpulled, unpushed] = await Promise.all([
+    getUncommittedCount(repoPath),
+    getUnpulledCount(repoPath),
+    getUnpushedCount(repoPath),
+  ]);
+  return { uncommitted, unpulled, unpushed };
 }
 
 // --- Callbacks ---
@@ -58,7 +88,7 @@ export class AgentManager {
 
   // --- Public API ---
 
-  createSession(cwd: string, model?: string): AgentSession {
+  createSession(cwd: string, model?: string, permissionMode?: PermissionMode): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
 
@@ -77,6 +107,7 @@ export class AgentManager {
       outputTokens: 0,
       turnCount: 0,
       model: model || "claude-opus-4-6",
+      permissionMode: permissionMode || "default",
       pendingQuestion: null,
       pendingPermission: null,
       messages: [],
@@ -88,8 +119,8 @@ export class AgentManager {
     return session;
   }
 
-  async launch(cwd: string, prompt: string, model?: string): Promise<AgentSession> {
-    const session = this.createSession(cwd, model);
+  async launch(cwd: string, prompt: string, model?: string, permissionMode?: PermissionMode): Promise<AgentSession> {
+    const session = this.createSession(cwd, model, permissionMode);
     await this.scanLaunchableRepos();
     await this.sendMessage(session.id, prompt);
     return session;
@@ -122,12 +153,16 @@ export class AgentManager {
       cwd: session.cwd,
       model: session.model,
       abortController,
+      permissionMode: session.permissionMode,
       settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
         return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID);
       },
     };
+    if (session.permissionMode === 'bypassPermissions') {
+      options.allowDangerouslySkipPermissions = true;
+    }
     if (session.sdkSessionId) {
       options.resume = session.sdkSessionId;
     }
@@ -207,6 +242,17 @@ export class AgentManager {
     if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
     session.pendingPermission = null;
     session.pendingQuestion = null;
+    this.onSessionChange(this.getSessions());
+  }
+
+  async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    session.permissionMode = mode;
+    const q = this.queries.get(sessionId);
+    if (q && typeof (q as any).setPermissionMode === "function") {
+      await (q as any).setPermissionMode(mode);
+    }
     this.onSessionChange(this.getSessions());
   }
 
@@ -322,16 +368,22 @@ export class AgentManager {
                   toolUseId: block.id,
                 });
                 break;
-              case "tool_result":
+              case "tool_result": {
+                const toolUseId = (block as any).tool_use_id;
+                const matchingToolUse = contentBlocks.find(
+                  (b) => b.type === "tool_use" && b.toolUseId === toolUseId
+                );
                 contentBlocks.push({
                   type: "tool_result",
                   content: typeof (block as any).content === "string"
                     ? (block as any).content
                     : JSON.stringify((block as any).content),
-                  toolUseId: (block as any).tool_use_id,
+                  toolUseId,
+                  toolName: matchingToolUse?.toolName,
                   isError: (block as any).is_error,
                 });
                 break;
+              }
             }
           }
         }
@@ -579,7 +631,7 @@ export class AgentManager {
       }
 
       await Promise.all(repos.map(async (r) => {
-        r.pendingCommits = await getPendingCommitCount(r.path);
+        r.gitStatus = await getRepoGitStatus(r.path);
       }));
 
       this.launchableRepos = repos.sort((a, b) => a.name.localeCompare(b.name));
@@ -588,15 +640,17 @@ export class AgentManager {
     }
   }
 
-  async getRepoPendingCounts(): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
+  async getRepoPendingCounts(): Promise<Map<string, RepoGitStatus>> {
+    const counts = new Map<string, RepoGitStatus>();
     const uniqueCwds = new Set(
       Array.from(this.sessions.values()).map((s) => s.cwd)
     );
     await Promise.all(
       Array.from(uniqueCwds).map(async (cwd) => {
-        const count = await getPendingCommitCount(cwd);
-        if (count > 0) counts.set(cwd, count);
+        const status = await getRepoGitStatus(cwd);
+        if (status.uncommitted > 0 || status.unpulled > 0 || status.unpushed > 0) {
+          counts.set(cwd, status);
+        }
       })
     );
     return counts;

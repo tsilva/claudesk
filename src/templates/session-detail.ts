@@ -1,12 +1,25 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderPermissionPrompt, renderQuestionPrompt } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, renderPermissionPrompt, renderQuestionPrompt, modeLabel } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
-  // Render initial messages inline
-  const messagesHtml = messages
-    .slice()
-    .reverse()
-    .map((msg) => renderMessage(msg))
+  // Find non-error result message to fold into last assistant message
+  const resultMsg = messages.find((msg) => msg.type === "result" && !msg.isError);
+  const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
+
+  // Render initial messages, injecting footer into the last assistant message
+  const reversed = messages.slice().reverse();
+  let footerInjected = false;
+  const messagesHtml = reversed
+    .map((msg) => {
+      const html = renderMessage(msg);
+      if (!html) return null;
+      // Inject footer into the first (newest) assistant message
+      if (!footerInjected && footerHtml && msg.type === "assistant" && html) {
+        footerInjected = true;
+        return html.replace(/<\/div><\/div>$/, footerHtml + "</div></div>");
+      }
+      return html;
+    })
     .filter(Boolean)
     .join("\n");
 
@@ -32,6 +45,9 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         <input type="text" name="text" class="message-input"
           placeholder="Send a message..." autocomplete="off"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>
+        <button type="button" class="mode-cycle-btn"
+          onclick="cycleMode('${session.id}')"
+          title="Permission mode (click to cycle)">${escapeHtml(modeLabel(session.permissionMode))} &#x21bb;</button>
         <button type="submit" class="btn btn--primary message-send-btn"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>Send</button>
       </form>

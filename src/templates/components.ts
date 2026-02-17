@@ -1,5 +1,26 @@
-import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission, PendingQuestion } from "../types.ts";
+import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission, PendingQuestion, PermissionMode } from "../types.ts";
 import { renderMarkdown } from "../markdown.ts";
+
+// --- Permission Mode ---
+
+const MODE_ORDER: PermissionMode[] = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
+const MODE_LABELS: Record<PermissionMode, string> = {
+  default: 'Default',
+  plan: 'Plan',
+  acceptEdits: 'Accept Edits',
+  bypassPermissions: 'Bypass',
+  delegate: 'Delegate',
+  dontAsk: "Don't Ask",
+};
+
+export function modeLabel(mode: PermissionMode): string {
+  return MODE_LABELS[mode] || MODE_LABELS.default;
+}
+
+export function nextMode(mode: PermissionMode): PermissionMode {
+  const idx = MODE_ORDER.indexOf(mode);
+  return MODE_ORDER[(idx + 1) % MODE_ORDER.length] ?? 'default';
+}
 
 // --- Escaping ---
 
@@ -66,6 +87,16 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+// --- Task Tool Detection ---
+
+const TASK_TOOL_NAMES = new Set([
+  "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+]);
+
+function isTaskTool(name: string | undefined): boolean {
+  return !!name && TASK_TOOL_NAMES.has(name);
+}
+
 function truncatePreview(str: string, max = 80): string {
   const collapsed = str.replace(/\n/g, " ").trim();
   if (collapsed.length <= max) return collapsed;
@@ -107,6 +138,19 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
       return truncatePreview(inp.description ?? "");
     case "NotebookEdit":
       return truncatePreview(inp.notebook_path ?? "");
+    case "TodoWrite": {
+      const todos = Array.isArray(inp.todos) ? inp.todos : [];
+      const done = todos.filter((t: any) => t.status === "completed").length;
+      return `${done}/${todos.length} tasks`;
+    }
+    case "TaskCreate":
+      return truncatePreview(inp.subject ?? "");
+    case "TaskUpdate":
+      return `#${inp.taskId ?? "?"}${inp.status ? ` → ${inp.status}` : ""}`;
+    case "TaskList":
+      return "listing tasks";
+    case "TaskGet":
+      return `#${inp.taskId ?? "?"}`;
     default: {
       const fallbackKeys = ["command", "file_path", "path", "pattern", "query", "url", "description"];
       for (const key of fallbackKeys) {
@@ -137,12 +181,16 @@ export function renderSessionHeaderStatus(session: AgentSession): string {
 export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
+  const mode = session.permissionMode && session.permissionMode !== 'default'
+    ? modeLabel(session.permissionMode)
+    : "";
   return `<div class="stats-row">
     <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
     <span class="stat">${session.turnCount} turn${session.turnCount !== 1 ? "s" : ""}</span>
     ${cost ? `<span class="stat-sep">·</span><span class="stat">${cost}</span>` : ""}
     ${session.model ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(session.model)}</span>` : ""}
+    ${mode ? `<span class="stat-sep">·</span><span class="stat mode-stat">${escapeHtml(mode)}</span>` : ""}
   </div>`;
 }
 
@@ -290,12 +338,17 @@ function renderContentBlock(block: ContentBlock): string {
 
     case "tool_use": {
       const name = block.toolName ?? "Unknown tool";
-      const input = block.toolInput
+      const rawJson = block.toolInput
         ? JSON.stringify(block.toolInput, null, 2)
         : "";
-      const displayInput = input.length > 500
-        ? input.slice(0, 500) + "\n..."
-        : input;
+
+      if (isTaskTool(name)) {
+        return renderTaskToolUse(name, block.toolInput as Record<string, any>, rawJson);
+      }
+
+      const displayInput = rawJson.length > 500
+        ? rawJson.slice(0, 500) + "\n..."
+        : rawJson;
       const preview = getToolPreview(name, block.toolInput as Record<string, any>);
 
       return `<details class="tool-block">
@@ -311,6 +364,11 @@ function renderContentBlock(block: ContentBlock): string {
     case "tool_result": {
       const content = block.content ?? "";
       const isError = block.isError ?? false;
+
+      if (!isError && isTaskTool(block.toolName)) {
+        return renderTaskToolResult(block.toolName!, content);
+      }
+
       const displayContent = content.length > 1000
         ? content.slice(0, 1000) + "\n..."
         : content;
@@ -325,6 +383,184 @@ function renderContentBlock(block: ContentBlock): string {
   }
 }
 
+// --- Task Tool Rendering ---
+
+function taskStatusIcon(status: string): { char: string; cls: string } {
+  switch (status) {
+    case "completed":
+      return { char: "\u2713", cls: "task-status--completed" };
+    case "in_progress":
+      return { char: "\u25CF", cls: "task-status--in-progress" };
+    default:
+      return { char: "\u25CB", cls: "task-status--pending" };
+  }
+}
+
+function renderTaskItem(subject: string, status: string, activeForm?: string, desc?: string): string {
+  const icon = taskStatusIcon(status);
+  const subjectCls = status === "completed" ? " task-item-subject--done" : "";
+  const activeLabel = status === "in_progress" && activeForm
+    ? `<span class="task-item-active">${escapeHtml(activeForm)}</span>`
+    : "";
+
+  return `<div class="task-item">
+    <span class="task-status ${icon.cls}">${icon.char}</span>
+    <span class="task-item-subject${subjectCls}">${escapeHtml(subject)}</span>
+    ${activeLabel}
+  </div>`;
+}
+
+function renderTodoWriteUse(input: Record<string, any>): string {
+  const todos: any[] = Array.isArray(input.todos) ? input.todos : [];
+  const done = todos.filter((t) => t.status === "completed").length;
+  const total = todos.length;
+
+  let items = "";
+  for (const t of todos) {
+    items += renderTaskItem(
+      t.subject ?? "Untitled",
+      t.status ?? "pending",
+      t.activeForm,
+      t.description,
+    );
+  }
+
+  return `<div class="task-list-header">
+    <span class="task-list-icon">\u2611</span>
+    <span class="task-list-title">Tasks</span>
+    <span class="task-list-count">${done}/${total}</span>
+  </div>
+  <div class="task-items">${items}</div>`;
+}
+
+function renderTaskCreateUse(input: Record<string, any>): string {
+  return `<div class="task-list-header">
+    <span class="task-list-icon">+</span>
+    <span class="task-list-title">New Task</span>
+  </div>
+  <div class="task-items">${renderTaskItem(
+    input.subject ?? "Untitled",
+    "pending",
+    input.activeForm,
+    input.description,
+  )}</div>`;
+}
+
+function renderTaskUpdateUse(input: Record<string, any>): string {
+  const parts: string[] = [];
+  if (input.status) parts.push(input.status);
+  if (input.subject) parts.push(`"${input.subject}"`);
+  const summary = parts.length ? parts.join(" — ") : "updating";
+
+  return `<div class="task-list-header">
+    <span class="task-list-icon">\u270E</span>
+    <span class="task-list-title">Update #${escapeHtml(String(input.taskId ?? "?"))}</span>
+    <span class="task-list-count">${escapeHtml(summary)}</span>
+  </div>`;
+}
+
+function renderTaskListUse(): string {
+  return `<div class="task-list-header">
+    <span class="task-list-icon">\u2630</span>
+    <span class="task-list-title">Listing tasks</span>
+  </div>`;
+}
+
+function renderTaskGetUse(input: Record<string, any>): string {
+  return `<div class="task-list-header">
+    <span class="task-list-icon">\u2630</span>
+    <span class="task-list-title">Getting task #${escapeHtml(String(input.taskId ?? "?"))}</span>
+  </div>`;
+}
+
+function renderTaskToolUse(name: string, input: Record<string, any> | null | undefined, rawJson: string): string {
+  const inp = input ?? {};
+  let body = "";
+
+  switch (name) {
+    case "TodoWrite":
+      body = renderTodoWriteUse(inp);
+      break;
+    case "TaskCreate":
+      body = renderTaskCreateUse(inp);
+      break;
+    case "TaskUpdate":
+      body = renderTaskUpdateUse(inp);
+      break;
+    case "TaskList":
+      body = renderTaskListUse();
+      break;
+    case "TaskGet":
+      body = renderTaskGetUse(inp);
+      break;
+    default:
+      body = `<div class="task-list-header"><span class="task-list-title">${escapeHtml(name)}</span></div>`;
+  }
+
+  const displayRaw = rawJson.length > 500
+    ? rawJson.slice(0, 500) + "\n..."
+    : rawJson;
+
+  return `<div class="task-tool-block">
+    ${body}
+    ${rawJson ? `<details class="task-tool-raw"><summary>JSON</summary><pre class="tool-input">${escapeHtml(displayRaw)}</pre></details>` : ""}
+  </div>`;
+}
+
+function renderTaskToolResult(toolName: string, content: string): string {
+  if (!content.trim()) return "";
+
+  // Try to parse structured results for TaskList/TaskGet
+  if (toolName === "TaskList" || toolName === "TaskGet") {
+    try {
+      const parsed = JSON.parse(content);
+
+      // TaskList returns an array of tasks
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const done = parsed.filter((t: any) => t.status === "completed").length;
+        let items = "";
+        for (const t of parsed) {
+          items += renderTaskItem(
+            t.subject ?? `#${t.id ?? "?"}`,
+            t.status ?? "pending",
+            t.activeForm,
+          );
+        }
+        return `<div class="task-tool-block">
+          <div class="task-list-header">
+            <span class="task-list-icon">\u2611</span>
+            <span class="task-list-title">Tasks</span>
+            <span class="task-list-count">${done}/${parsed.length}</span>
+          </div>
+          <div class="task-items">${items}</div>
+        </div>`;
+      }
+
+      // TaskGet returns a single task object
+      if (parsed && typeof parsed === "object" && parsed.subject) {
+        return `<div class="task-tool-block">
+          <div class="task-items">${renderTaskItem(
+            parsed.subject,
+            parsed.status ?? "pending",
+            parsed.activeForm,
+            parsed.description,
+          )}</div>
+        </div>`;
+      }
+    } catch {
+      // Fall through to default
+    }
+  }
+
+  // Default: compact result for task tools (suppress verbose output)
+  const displayContent = content.length > 300
+    ? content.slice(0, 300) + "..."
+    : content;
+  return `<div class="tool-result">
+    <pre class="tool-result-content">${escapeHtml(displayContent)}</pre>
+  </div>`;
+}
+
 function renderResultMessage(msg: AgentMessage): string {
   if (msg.isError) {
     return `<div class="message message--system message--error" data-id="${msg.id}" title="Error">
@@ -332,6 +568,11 @@ function renderResultMessage(msg: AgentMessage): string {
     </div>`;
   }
 
+  // Non-error results are rendered as turn-complete footers, not standalone messages
+  return "";
+}
+
+export function renderTurnCompleteFooter(msg: AgentMessage): string {
   const parts: string[] = [];
   if (msg.durationMs) parts.push(`Completed in ${formatDuration(msg.durationMs)}`);
   if (msg.costUsd) parts.push(formatCost(msg.costUsd));
@@ -339,9 +580,7 @@ function renderResultMessage(msg: AgentMessage): string {
 
   const summary = parts.length > 0 ? parts.join(" · ") : "Done";
 
-  return `<div class="message message--system" data-id="${msg.id}" title="Result">
-    <div class="message-content">${escapeHtml(summary)}</div>
-  </div>`;
+  return `<div class="turn-complete-footer">${escapeHtml(summary)}</div>`;
 }
 
 function renderSystemMessage(msg: AgentMessage): string {

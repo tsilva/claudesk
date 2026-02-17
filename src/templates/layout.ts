@@ -1,4 +1,4 @@
-import type { AgentSession, LaunchableRepo, AgentMessage } from "../types.ts";
+import type { AgentSession, LaunchableRepo, AgentMessage, RepoGitStatus } from "../types.ts";
 import { renderSidebar } from "./sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./session-detail.ts";
 
@@ -7,7 +7,7 @@ export function renderLayout(
   repos: LaunchableRepo[],
   activeSession: AgentSession | null,
   messages: AgentMessage[] = [],
-  pendingCounts?: Map<string, number>
+  pendingCounts?: Map<string, RepoGitStatus>
 ): string {
   const sidebarHtml = renderSidebar(sessions, repos, activeSession?.id, pendingCounts);
   const detailHtml = activeSession
@@ -28,6 +28,7 @@ export function renderLayout(
 <body>
   <div class="app" hx-ext="sse" sse-connect="/events${activeSession ? `?session=${activeSession.id}` : ""}">
     <div hx-trigger="sse:notify" hx-swap="none" style="display:none"></div>
+    <div hx-trigger="sse:turn-complete" hx-swap="none" style="display:none"></div>
     <header class="header">
       <div class="header-left">
         <span class="logo">claudesk</span>

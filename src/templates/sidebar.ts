@@ -1,11 +1,23 @@
-import type { AgentSession, LaunchableRepo } from "../types.ts";
+import type { AgentSession, LaunchableRepo, RepoGitStatus } from "../types.ts";
 import { escapeHtml, statusDot, relativeTime, formatTokens } from "./components.ts";
+
+function renderGitBadges(status: RepoGitStatus | undefined): string {
+  if (!status) return "";
+  const parts: string[] = [];
+  if (status.uncommitted > 0)
+    parts.push(`<span class="git-badge git-badge--uncommitted" title="${status.uncommitted} uncommitted change${status.uncommitted !== 1 ? "s" : ""}">~${status.uncommitted}</span>`);
+  if (status.unpulled > 0)
+    parts.push(`<span class="git-badge git-badge--unpulled" title="${status.unpulled} unpulled commit${status.unpulled !== 1 ? "s" : ""}">&#8595;${status.unpulled}</span>`);
+  if (status.unpushed > 0)
+    parts.push(`<span class="git-badge git-badge--unpushed" title="${status.unpushed} unpushed commit${status.unpushed !== 1 ? "s" : ""}">&#8593;${status.unpushed}</span>`);
+  return parts.join("");
+}
 
 export function renderSidebar(
   sessions: AgentSession[],
   repos: LaunchableRepo[],
   activeSessionId?: string,
-  pendingCounts?: Map<string, number>
+  pendingCounts?: Map<string, RepoGitStatus>
 ): string {
   // Group sessions by repo
   const groups = new Map<string, AgentSession[]>();
@@ -20,12 +32,12 @@ export function renderSidebar(
   // Session groups
   for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const cwd = repoSessions[0]?.cwd ?? "";
-    const groupCount = pendingCounts?.get(cwd) ?? 0;
+    const groupStatus = pendingCounts?.get(cwd);
     html += `<div class="repo-group" data-repo="${escapeHtml(repoName)}">
       <div class="repo-group-header">
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
         <span>${escapeHtml(repoName)}</span>
-        ${groupCount > 0 ? `<span class="pending-commits-badge">${groupCount}</span>` : ""}
+        ${renderGitBadges(groupStatus)}
         <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
@@ -66,11 +78,10 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of repos) {
-      const repoCount = repo.pendingCommits ?? 0;
       html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeHtml(repo.path)}')">
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>
-        ${repoCount > 0 ? `<span class="pending-commits-badge">${repoCount}</span>` : ""}
+        ${renderGitBadges(repo.gitStatus)}
         <span class="launch-item-action">+</span>
       </button>`;
     }

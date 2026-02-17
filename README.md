@@ -4,8 +4,9 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun-f9f1e1.svg?logo=bun)](https://bun.sh)
   [![HTMX](https://img.shields.io/badge/HTMX-SSE-3366cc.svg)](https://htmx.org)
+  [![Claude SDK](https://img.shields.io/badge/Claude-Agents_SDK-d97757.svg)](https://docs.anthropic.com)
 
-  🖥️ **Real-time monitoring dashboard for Claude Code agent sessions** ⚡
+  🖥️ **Interactive dashboard for launching and managing Claude Code agents** ⚡
 
   [GitHub](https://github.com/tsilva/claudesk)
 </div>
@@ -14,21 +15,22 @@
 
 ## 🔍 Overview
 
-**The pain:** Running multiple Claude Code sessions across different projects means constantly switching terminals to check status, missing permission prompts, and losing track of token usage.
+**The pain:** Running Claude Code agents across different repositories means juggling terminals, missing permission prompts, and having no central view of what your agents are doing.
 
-**The solution:** claudesk auto-discovers every active Claude Code instance on your machine, tails their conversation logs in real time, and streams updates to a single browser dashboard over SSE — no polling, no manual setup.
+**The solution:** claudesk uses the Claude Agents SDK to launch and manage coding agents directly from a web dashboard — start agents, send follow-up prompts, approve permissions, and monitor progress in real time.
 
-**The result:** One glance tells you which sessions are streaming, which need permission, and what each agent is working on — with desktop notifications so you never miss a prompt.
+**The result:** One browser tab to launch, interact with, and control all your Claude Code agents — with live streaming, permission handling, and desktop notifications.
 
 ### ✨ Features
 
-- 🔄 **Auto-discovery** — finds sessions via registry files and lock file fallback, no config needed
-- 📡 **Real-time streaming** — JSONL file tailing with `fs.watch` + polling fallback, debounced at 200ms
-- 🔔 **Desktop notifications** — instant alerts when a session needs permission or stops
-- 🚀 **Session launching** — spin up new Claude Code sessions from the dashboard
-- 📊 **Token tracking** — live token counts and turn stats per session
-- 🪟 **Window focus** — jump to any session's editor with one click
-- 🎨 **Dark theme** — purpose-built UI with session grouping by repo
+- 🚀 **Launch agents** — start Claude Code agents on any git repo from the dashboard
+- 💬 **Interactive conversations** — send follow-up prompts and get streaming responses
+- 🔐 **Permission handling** — approve or deny tool permissions through the UI
+- 📡 **Real-time streaming** — SDK message stream via SSE with HTMX partial updates
+- 🔔 **Desktop notifications** — instant alerts when an agent needs input
+- 📊 **Cost & token tracking** — live token counts, turn stats, and cost per session
+- ⏹️ **Agent control** — stop running agents, dismiss completed sessions
+- 🎨 **Dark theme** — purpose-built terminal-aesthetic UI with session grouping by repo
 
 ### 🛠️ Tech Stack
 
@@ -36,6 +38,7 @@
 |-------|-----------|
 | Runtime | [Bun](https://bun.sh) |
 | Server | [Hono](https://hono.dev) |
+| Agent SDK | [@anthropic-ai/claude-agent-sdk](https://docs.anthropic.com) |
 | Frontend | [HTMX](https://htmx.org) + SSE |
 | Styling | Vanilla CSS (dark theme) |
 | Build step | None |
@@ -47,6 +50,7 @@
 ### Prerequisites
 
 - [Bun](https://bun.sh) (v1.0+)
+- An Anthropic API key (set `ANTHROPIC_API_KEY` environment variable)
 
 ### Install & Run
 
@@ -57,24 +61,7 @@ bun install
 bun run dev
 ```
 
-Open **http://localhost:3456** — any active Claude Code sessions are discovered automatically.
-
-### 🔧 Enhanced Session Discovery (Optional)
-
-For more reliable session tracking, install the `claude-wrapper` script that registers sessions on startup:
-
-```bash
-mkdir -p ~/.claude/bin
-ln -sf "$(pwd)/scripts/claude-wrapper" ~/.claude/bin/claude
-```
-
-Add to your `~/.zshrc` (before any other PATH additions):
-
-```bash
-export PATH="$HOME/.claude/bin:$PATH"
-```
-
-This creates registry entries at `~/.claude/ide/sessions/{pid}.json` for authoritative session matching.
+Open **http://localhost:3456** — select a repo from the sidebar, enter a prompt, and launch an agent.
 
 ---
 
@@ -83,30 +70,29 @@ This creates registry entries at `~/.claude/ide/sessions/{pid}.json` for authori
 ### Data Flow
 
 ```
-JSONL file change → JsonlTailer (fs.watch + poll)
-  → parseRawMessage() → SessionManager.handleMessage()
-    → Update session state (status, tokens, branch)
-    → Server.onMessage() → renderMessage() → SSE broadcast
-      → Browser: HTMX swaps (stream-append, sidebar, session-stats)
+User clicks "Launch" → POST /api/agents/launch { cwd, prompt }
+  → AgentManager.launch() → SDK query({ prompt, options: { cwd, canUseTool } })
+    → for await (msg of generator)
+      → transform SDKMessage → AgentMessage → renderMessage() → SSE broadcast
+        → Browser: HTMX swaps (stream-append, sidebar, session-stats)
+
+User sends follow-up → POST /api/agents/:id/message { text }
+  → query({ prompt: text, options: { resume: sessionId } })
+
+Agent needs permission → canUseTool callback
+  → Promise blocks SDK → SSE "permission-request" → UI renders approval
+  → User clicks Allow/Deny → resolve() → SDK continues
 ```
-
-### Session Discovery
-
-Sessions are identified through two mechanisms:
-
-1. **Registry-backed** (authoritative) — `claude-wrapper` writes `~/.claude/ide/sessions/{pid}.json` with PID, cwd, and start time. JSONL matched by birthtime within a 30s window.
-2. **Lock-file fallback** — reads `~/.claude/ide/*.lock` for workspaces without registry entries. Finds JSONLs modified in the last 5 minutes.
-
-Discovery runs every 3 seconds with PID validation to detect dead sessions.
 
 ### Core Modules
 
 | Module | Purpose |
 |--------|---------|
-| `src/server.ts` | Hono HTTP server, SSE client management, route handlers |
-| `src/sessions.ts` | `SessionManager` (discovery, state) + `JsonlTailer` (file watching) |
+| `src/types.ts` | Shared type definitions (`AgentSession`, `AgentMessage`, `ContentBlock`, etc.) |
+| `src/agents.ts` | `AgentManager` — launches SDK agents, consumes streams, handles permissions |
+| `src/server.ts` | Hono HTTP server, SSE client management, REST API endpoints |
 | `src/templates/` | Server-rendered HTML string templates (layout, sidebar, session detail, components) |
-| `static/app.js` | Session switching, SSE reconnection, notifications |
+| `static/app.js` | Session switching, SSE reconnection, agent interaction, notifications |
 
 ---
 
@@ -119,37 +105,27 @@ Discovery runs every 3 seconds with PID validation to detect dead sessions.
 | `GET /` | Full dashboard page |
 | `GET /sessions/:id/detail` | Session detail fragment (HTMX partial) |
 
-### API Endpoints
+### Agent API
 
-| Route | Description |
-|-------|-------------|
-| `GET /events?session=<id>` | SSE stream filtered by session |
-| `POST /api/hook` | Webhook for Claude Code permission/stop events |
-| `POST /sessions/:id/focus` | Focus the session's editor window |
-| `POST /launch` | Launch a new Claude Code session in Cursor |
+| Route | Body | Description |
+|-------|------|-------------|
+| `POST /api/agents/launch` | `{ cwd, prompt, model? }` | Launch a new agent |
+| `POST /api/agents/:id/message` | `{ text }` | Send follow-up message |
+| `POST /api/agents/:id/permission` | `{ allow, message? }` | Respond to permission request |
+| `POST /api/agents/:id/answer` | `{ answers }` | Answer agent question |
+| `POST /api/agents/:id/stop` | — | Stop a running agent |
+| `DELETE /sessions/:id` | — | Dismiss a session |
 
 ### SSE Event Types
 
 | Event | Payload | Purpose |
 |-------|---------|---------|
 | `stream-append` | Message HTML | New conversation message |
-| `stream-progress` | Progress HTML | Streaming progress indicator |
-| `session-stats` | Stats HTML | Token/turn count update |
+| `permission-request` | Permission UI HTML | Tool permission approval prompt |
+| `session-stats` | Stats HTML | Token/turn/cost update |
 | `sidebar` | Sidebar HTML | Full sidebar re-render |
 | `notify` | JSON | Browser notification trigger |
-
-### Webhook Integration
-
-Configure a Claude Code hook to send permission and stop events:
-
-```json
-{
-  "hooks": {
-    "Permission": [{ "command": "curl -s -X POST http://localhost:3456/api/hook -H 'Content-Type: application/json' -d '{\"event\":\"permission\",\"project\":\"$PROJECT\"}'" }],
-    "Stop": [{ "command": "curl -s -X POST http://localhost:3456/api/hook -H 'Content-Type: application/json' -d '{\"event\":\"stop\",\"project\":\"$PROJECT\"}'" }]
-  }
-}
-```
+| `ping` | — | Keep-alive |
 
 ---
 

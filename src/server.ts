@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
-import { SessionManager, type Session, type ParsedMessage } from "./sessions.ts";
+import { AgentManager } from "./agents.ts";
+import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
-import { renderMessage, renderSessionStats } from "./templates/components.ts";
+import { renderMessage, renderSessionStats, renderPermissionPrompt } from "./templates/components.ts";
 
 const PORT = 3456;
 
@@ -13,7 +14,7 @@ const PORT = 3456;
 
 interface SSEClient {
   id: string;
-  sessionId: string | null; // which session this client is viewing
+  sessionId: string | null;
   send: (event: string, data: string) => void;
   close: () => void;
 }
@@ -28,49 +29,41 @@ function broadcast(event: string, data: string, sessionFilter?: string) {
   }
 }
 
-function broadcastAll(event: string, data: string) {
-  for (const client of clients.values()) {
-    client.send(event, data);
-  }
-}
-
 function broadcastSidebar() {
-  const sessions = sessionManager.getSessions();
-  const repos = sessionManager.getLaunchableRepos();
+  const sessions = agentManager.getSessions();
+  const repos = agentManager.getLaunchableRepos();
   for (const client of clients.values()) {
     const html = renderSidebar(sessions, repos, client.sessionId ?? undefined);
     client.send("sidebar", html);
   }
 }
 
-// --- Session Manager ---
+// --- Agent Manager ---
 
-const sessionManager = new SessionManager(
+const agentManager = new AgentManager(
   // onMessage callback
-  (msg: ParsedMessage, session: Session) => {
-    if (msg.type === "progress") {
-      const html = renderMessage(msg);
-      if (html) {
-        broadcast("stream-progress", html, session.id);
+  (msg: AgentMessage, session: AgentSession) => {
+    if (msg.type === "system" && msg.text?.startsWith("Permission requested:")) {
+      // Send permission prompt to viewers of this session
+      if (session.pendingPermission) {
+        const html = renderPermissionPrompt(session.pendingPermission, session.id);
+        broadcast("permission-request", html, session.id);
       }
     } else {
-      // Clear progress indicator before appending real content
-      broadcast("stream-progress", "", session.id);
       const html = renderMessage(msg);
       if (html) {
         broadcast("stream-append", html, session.id);
       }
     }
-    // Update sidebar for all clients on status changes
-    if (msg.type === "user" || msg.type === "assistant" || msg.type === "system") {
+    // Update sidebar + stats on meaningful messages
+    if (msg.type === "user" || msg.type === "assistant" || msg.type === "result") {
       broadcastSidebar();
-      // Update stats for viewers of this session
       const statsHtml = renderSessionStats(session);
       broadcast("session-stats", statsHtml, session.id);
     }
   },
   // onSessionChange callback
-  (_sessions: Session[]) => {
+  (_sessions: AgentSession[]) => {
     broadcastSidebar();
   }
 );
@@ -84,11 +77,11 @@ app.use("/static/*", serveStatic({ root: "./" }));
 
 // Full page
 app.get("/", async (c) => {
-  const sessions = sessionManager.getSessions();
-  const repos = sessionManager.getLaunchableRepos();
+  const sessions = agentManager.getSessions();
+  const repos = agentManager.getLaunchableRepos();
   const activeSession = sessions[0] ?? null;
   const messages = activeSession
-    ? await sessionManager.getRecentMessages(activeSession.id)
+    ? agentManager.getRecentMessages(activeSession.id)
     : [];
   return c.html(renderLayout(sessions, repos, activeSession, messages));
 });
@@ -105,7 +98,6 @@ app.get("/events", (c) => {
       sessionId,
       send: (event, data) => {
         stream.writeSSE({ event, data }).catch(() => {
-          // Client disconnected
           clients.delete(clientId);
         });
       },
@@ -124,13 +116,11 @@ app.get("/events", (c) => {
       });
     }, 15000);
 
-    // Wait until stream is closed
     stream.onAbort(() => {
       clearInterval(keepAlive);
       clients.delete(clientId);
     });
 
-    // Hold the stream open
     await new Promise(() => {});
   });
 });
@@ -138,117 +128,88 @@ app.get("/events", (c) => {
 // Session detail fragment (HTMX swap)
 app.get("/sessions/:id/detail", async (c) => {
   const id = c.req.param("id");
-  const session = sessionManager.getSession(id);
+  const session = agentManager.getSession(id);
   if (!session) {
     return c.html(renderEmptyDetail());
   }
-  const messages = await sessionManager.getRecentMessages(id);
+  const messages = agentManager.getRecentMessages(id);
   return c.html(renderSessionDetail(session, messages));
 });
 
-// Hook receiver
-app.post("/api/hook", async (c) => {
-  try {
-    const body = await c.req.json<{ event: string; project: string }>();
-    const { event, project } = body;
-
-    // Find session by project dir
-    const sessions = sessionManager.getSessions();
-    const session = sessions.find((s) => project?.includes(s.repoName));
-
-    if (session) {
-      if (event === "permission") {
-        sessionManager.setSessionStatus(session.id, "needs_permission");
-      }
-
-      // Push notification to all clients
-      broadcastAll("notify", JSON.stringify({
-        event,
-        sessionId: session.id,
-        repoName: session.repoName,
-        slug: session.slug,
-      }));
-
-      // Update sidebar
-      broadcastSidebar();
-    }
-
-    return c.json({ ok: true });
-  } catch {
-    return c.json({ ok: false }, 400);
-  }
-});
-
-// Focus window via AeroSpace
-app.post("/sessions/:id/focus", async (c) => {
-  const id = c.req.param("id");
-  const session = sessionManager.getSession(id);
-  if (!session) return c.json({ error: "not found" }, 404);
-
-  try {
-    const proc = Bun.spawn([
-      "/Users/tsilva/.claude/focus-window.sh",
-      session.repoName,
-    ]);
-    await proc.exited;
-    return c.json({ ok: true });
-  } catch {
-    return c.json({ error: "focus failed" }, 500);
-  }
-});
-
-// Dismiss (remove) a session
+// Dismiss a session
 app.delete("/sessions/:id", async (c) => {
   const id = c.req.param("id");
-  const found = await sessionManager.dismissSession(id);
+  const found = agentManager.dismissSession(id);
   if (!found) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
 
-// Launch Cursor for a repo and open Claude Code in its integrated terminal
-app.post("/launch", async (c) => {
-  const body = await c.req.parseBody();
-  const path = typeof body.path === "string" ? body.path : "";
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  if (!path) return c.json({ error: "path required" }, 400);
+// --- Agent API ---
 
+// Launch a new agent
+app.post("/api/agents/launch", async (c) => {
   try {
-    // Open the folder in Cursor first
-    Bun.spawn(["cursor", path]);
+    const body = await c.req.json<{ cwd: string; prompt: string; model?: string }>();
+    const { cwd, prompt, model } = body;
+    if (!cwd || !prompt) return c.json({ error: "cwd and prompt required" }, 400);
 
-    // Write a launch script to avoid AppleScript escaping issues
-    const tmpScript = `/tmp/claudesk-launch-${Date.now()}.sh`;
-    const claudeCmd = prompt
-      ? `claude '${prompt.replace(/'/g, "'\\''")}'`
-      : "claude";
-    await Bun.write(tmpScript, `${claudeCmd}\n`);
-
-    // Give Cursor a moment to activate, then create a new integrated terminal
-    const script = `
-      delay 2
-      tell application "System Events"
-        tell process "Cursor"
-          set frontmost to true
-          -- Split Terminal: Cmd+\\
-          key code 42 using {command down}
-          delay 1
-          keystroke "bash ${tmpScript}"
-          delay 0.2
-          keystroke return
-        end tell
-      end tell
-    `;
-    Bun.spawn(["osascript", "-e", script]);
-
-    return c.json({ ok: true });
-  } catch {
-    return c.json({ error: "launch failed" }, 500);
+    const session = await agentManager.launch(cwd, prompt, model);
+    return c.json({ ok: true, sessionId: session.id });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "launch failed" }, 500);
   }
 });
 
-// --- Start ---
+// Send a follow-up message
+app.post("/api/agents/:id/message", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ text: string }>();
+    if (!body.text) return c.json({ error: "text required" }, 400);
 
-sessionManager.start();
+    await agentManager.sendMessage(id, body.text);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
+});
+
+// Respond to a permission request
+app.post("/api/agents/:id/permission", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ allow: boolean; message?: string }>();
+
+    agentManager.respondToPermission(id, body.allow, body.message);
+    // Clear the permission prompt for viewers
+    broadcast("permission-request", "", id);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
+});
+
+// Answer a question
+app.post("/api/agents/:id/answer", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ answers: Record<string, string> }>();
+
+    agentManager.answerQuestion(id, body.answers);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
+});
+
+// Stop an agent
+app.post("/api/agents/:id/stop", async (c) => {
+  const id = c.req.param("id");
+  agentManager.stopAgent(id);
+  return c.json({ ok: true });
+});
+
+// --- Start ---
 
 export default {
   port: PORT,

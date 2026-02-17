@@ -1,4 +1,4 @@
-import type { Session, SessionStatus, ParsedMessage, ContentBlock } from "../sessions.ts";
+import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission } from "../types.ts";
 import { renderMarkdown } from "../markdown.ts";
 
 // --- Escaping ---
@@ -14,16 +14,18 @@ export function escapeHtml(str: string): string {
 
 // --- Status ---
 
-export function statusDot(status: SessionStatus): string {
+export function statusDot(status: AgentStatus): string {
   return `<span class="status-dot ${status}"></span>`;
 }
 
-export function statusBadge(status: SessionStatus): string {
-  const labels: Record<SessionStatus, string> = {
+export function statusBadge(status: AgentStatus): string {
+  const labels: Record<AgentStatus, string> = {
+    starting: "Starting",
     streaming: "Streaming",
     idle: "Idle",
-    needs_permission: "Permission",
-    died: "Ended",
+    needs_input: "Input",
+    error: "Error",
+    stopped: "Stopped",
   };
   return `<span class="status-badge ${status}">${labels[status]}</span>`;
 }
@@ -56,6 +58,12 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatCost(usd: number): string {
+  if (usd === 0) return "";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
 }
 
 function truncatePreview(str: string, max = 80): string {
@@ -113,48 +121,75 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
 
 // --- Session Stats ---
 
-export function renderSessionStats(session: Session): string {
+export function renderSessionStats(session: AgentSession): string {
+  const totalTokens = session.inputTokens + session.outputTokens;
+  const cost = formatCost(session.totalCostUsd);
   return `<div class="stats-row">
-    <span class="stat">${formatTokens(session.totalTokens)}</span>
+    <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
     <span class="stat">${session.turnCount} turn${session.turnCount !== 1 ? "s" : ""}</span>
-    ${session.gitBranch ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(session.gitBranch)}</span>` : ""}
+    ${cost ? `<span class="stat-sep">·</span><span class="stat">${cost}</span>` : ""}
+    ${session.model ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(session.model)}</span>` : ""}
+  </div>`;
+}
+
+// --- Permission Prompt ---
+
+export function renderPermissionPrompt(permission: PendingPermission, sessionId: string): string {
+  const inputPreview = JSON.stringify(permission.toolInput, null, 2);
+  const displayInput = inputPreview.length > 500
+    ? inputPreview.slice(0, 500) + "\n..."
+    : inputPreview;
+  const preview = getToolPreview(permission.toolName, permission.toolInput);
+
+  return `<div class="permission-prompt">
+    <div class="permission-prompt-header">
+      <span class="permission-prompt-icon">?</span>
+      <span class="permission-prompt-title">Permission Required</span>
+    </div>
+    <div class="permission-prompt-tool">
+      <span class="tool-icon">$</span>
+      <span class="tool-name">${escapeHtml(permission.toolName)}</span>
+      ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
+    </div>
+    <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
+    <div class="permission-prompt-actions">
+      <button class="btn btn--primary" onclick="approvePermission('${sessionId}')">Allow</button>
+      <button class="btn" onclick="denyPermission('${sessionId}')">Deny</button>
+    </div>
   </div>`;
 }
 
 // --- Message Rendering ---
 
-export function renderMessage(msg: ParsedMessage): string | null {
+export function renderMessage(msg: AgentMessage): string | null {
   switch (msg.type) {
     case "user":
       return renderUserMessage(msg);
     case "assistant":
       return renderAssistantMessage(msg);
-    case "progress":
-      return renderProgressMessage(msg);
+    case "result":
+      return renderResultMessage(msg);
     case "system":
       return renderSystemMessage(msg);
-    case "tool_use":
-    case "tool_result":
-      return renderToolMessage(msg);
     default:
       return null;
   }
 }
 
-function renderUserMessage(msg: ParsedMessage): string {
-  const text = msg.text ?? "";
+function renderUserMessage(msg: AgentMessage): string {
+  const text = msg.userText ?? msg.text ?? "";
   if (!text.trim()) return "";
 
-  return `<div class="message message--user" data-uuid="${msg.uuid}" title="User">
+  return `<div class="message message--user" data-id="${msg.id}" title="User">
     <div class="message-content">${escapeHtml(text)}</div>
   </div>`;
 }
 
-function renderAssistantMessage(msg: ParsedMessage): string {
+function renderAssistantMessage(msg: AgentMessage): string {
   if (!msg.contentBlocks?.length) return "";
 
-  let html = `<div class="message message--assistant" data-uuid="${msg.uuid}" title="Assistant">
+  let html = `<div class="message message--assistant" data-id="${msg.id}" title="Assistant">
     <div class="message-content">`;
 
   for (const block of msg.contentBlocks) {
@@ -188,7 +223,6 @@ function renderContentBlock(block: ContentBlock): string {
       const input = block.toolInput
         ? JSON.stringify(block.toolInput, null, 2)
         : "";
-      // Truncate long inputs
       const displayInput = input.length > 500
         ? input.slice(0, 500) + "\n..."
         : input;
@@ -221,57 +255,29 @@ function renderContentBlock(block: ContentBlock): string {
   }
 }
 
-function renderProgressMessage(msg: ParsedMessage): string {
-  const text = msg.progressMessage ?? "";
-  if (!text.trim()) return "";
-
-  // Agent progress shows as a small status line
-  if (msg.progressType === "agent_progress") {
-    const preview = text.slice(0, 120);
-    return `<div class="message message--progress" data-progress-type="agent">
-      <span class="progress-label">Agent</span> ${escapeHtml(preview)}${text.length > 120 ? "..." : ""}
+function renderResultMessage(msg: AgentMessage): string {
+  if (msg.isError) {
+    return `<div class="message message--system message--error" data-id="${msg.id}" title="Error">
+      <div class="message-content">${escapeHtml(msg.text ?? "Agent error")}</div>
     </div>`;
   }
 
-  return `<div class="message message--progress">
-    ${escapeHtml(text.slice(0, 200))}
+  const parts: string[] = [];
+  if (msg.durationMs) parts.push(`Completed in ${formatDuration(msg.durationMs)}`);
+  if (msg.costUsd) parts.push(formatCost(msg.costUsd));
+  if (msg.numTurns) parts.push(`${msg.numTurns} turns`);
+
+  const summary = parts.length > 0 ? parts.join(" · ") : "Done";
+
+  return `<div class="message message--system" data-id="${msg.id}" title="Result">
+    <div class="message-content">${escapeHtml(summary)}</div>
   </div>`;
 }
 
-function renderSystemMessage(msg: ParsedMessage): string {
-  if (msg.systemSubtype === "stop_hook_summary") {
-    return `<div class="message message--system" title="System">
-      <div class="message-content">Session stopped — waiting for input</div>
-    </div>`;
-  }
+function renderSystemMessage(msg: AgentMessage): string {
+  if (!msg.text) return "";
 
-  if (msg.durationMs) {
-    return `<div class="message message--system" title="System">
-      <div class="message-content">Turn completed in ${formatDuration(msg.durationMs)}</div>
-    </div>`;
-  }
-
-  return "";
-}
-
-function renderToolMessage(msg: ParsedMessage): string {
-  if (msg.type === "tool_use") {
-    let parsedInput: Record<string, any> | null = null;
-    if (msg.toolInput) {
-      try {
-        parsedInput = JSON.parse(msg.toolInput);
-      } catch {}
-    }
-    const toolName = msg.toolName ?? "Tool";
-    const preview = getToolPreview(toolName, parsedInput);
-    return `<details class="message message--tool">
-      <summary>
-        <span class="tool-icon">$</span>
-        <span class="tool-name">${escapeHtml(toolName)}</span>
-        ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
-      </summary>
-      ${msg.toolInput ? `<pre class="tool-input">${escapeHtml(msg.toolInput)}</pre>` : ""}
-    </details>`;
-  }
-  return "";
+  return `<div class="message message--system" data-id="${msg.id}" title="System">
+    <div class="message-content">${escapeHtml(msg.text)}</div>
+  </div>`;
 }

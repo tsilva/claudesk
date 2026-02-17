@@ -1,12 +1,12 @@
-import type { Session, LaunchableRepo, ParsedMessage } from "../sessions.ts";
+import type { AgentSession, LaunchableRepo, AgentMessage } from "../types.ts";
 import { renderSidebar } from "./sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./session-detail.ts";
 
 export function renderLayout(
-  sessions: Session[],
+  sessions: AgentSession[],
   repos: LaunchableRepo[],
-  activeSession: Session | null,
-  messages: ParsedMessage[] = []
+  activeSession: AgentSession | null,
+  messages: AgentMessage[] = []
 ): string {
   const sidebarHtml = renderSidebar(sessions, repos, activeSession?.id);
   const detailHtml = activeSession

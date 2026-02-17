@@ -390,13 +390,24 @@ ul, ol {
   background: var(--status-green);
 }
 
-.status-dot.needs_permission {
+.status-dot.needs_permission,
+.status-dot.needs_input {
   background: var(--status-amber);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot.starting {
+  background: var(--status-gray);
+  animation: pulse 1.5s ease-in-out infinite;
 }
 
 .status-dot.died,
 .status-dot.error {
   background: #ef4444;
+}
+
+.status-dot.stopped {
+  background: var(--status-gray);
 }
 
 /* --------------------------------------------------------------------------
@@ -553,10 +564,17 @@ ul, ol {
   background: rgba(74, 222, 128, 0.08);
 }
 
-.status-badge.needs_permission {
+.status-badge.needs_permission,
+.status-badge.needs_input {
   color: var(--status-amber);
   border-color: var(--status-amber);
   background: rgba(251, 191, 36, 0.08);
+}
+
+.status-badge.starting {
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 .status-badge.died,
@@ -564,6 +582,12 @@ ul, ol {
   color: #ef4444;
   border-color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
+}
+
+.status-badge.stopped {
+  color: var(--text-dim);
+  border-color: var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 /* --------------------------------------------------------------------------
@@ -1315,4 +1339,130 @@ button.launch-item {
 
 .thinking-block-content.markdown-body code {
   color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Message Input Area
+   -------------------------------------------------------------------------- */
+.message-input-area {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+}
+
+.message-input-area form {
+  display: flex;
+  gap: 8px;
+}
+
+.message-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.message-input:focus {
+  border-color: var(--accent-orange);
+}
+
+.message-input::placeholder {
+  color: var(--text-dim);
+}
+
+.message-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-send-btn {
+  flex-shrink: 0;
+}
+
+.message-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------------------
+   Permission Prompt
+   -------------------------------------------------------------------------- */
+.permission-prompt {
+  margin: 8px 16px;
+  padding: 12px;
+  background: rgba(251, 191, 36, 0.06);
+  border: 1px solid var(--status-amber);
+  border-radius: 6px;
+}
+
+.permission-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.permission-prompt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--status-amber);
+  color: #141413;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.permission-prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--status-amber);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.permission-prompt-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.permission-prompt-input {
+  background: var(--bg-tertiary);
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-x: auto;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.permission-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Error message variant
+   -------------------------------------------------------------------------- */
+.message--error {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
 }

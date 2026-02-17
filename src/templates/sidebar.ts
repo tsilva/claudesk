@@ -1,13 +1,13 @@
-import type { Session, LaunchableRepo } from "../sessions.ts";
+import type { AgentSession, LaunchableRepo } from "../types.ts";
 import { escapeHtml, statusDot, relativeTime, formatTokens } from "./components.ts";
 
 export function renderSidebar(
-  sessions: Session[],
+  sessions: AgentSession[],
   repos: LaunchableRepo[],
   activeSessionId?: string
 ): string {
   // Group sessions by repo
-  const groups = new Map<string, Session[]>();
+  const groups = new Map<string, AgentSession[]>();
   for (const session of sessions) {
     const existing = groups.get(session.repoName) ?? [];
     existing.push(session);
@@ -18,29 +18,27 @@ export function renderSidebar(
 
   // Session groups
   for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const workspaceFolder = repoSessions[0].workspaceFolder;
+    const cwd = repoSessions[0]?.cwd ?? "";
     html += `<div class="repo-group">
       <div class="launch-item-wrapper">
         <div class="repo-group-header" onclick="toggleLaunchPrompt(this)" style="cursor:pointer">
           <span>${escapeHtml(repoName)}</span>
           <span class="launch-item-action">+</span>
         </div>
-        <form class="launch-prompt-form hidden"
-          hx-post="/launch" hx-swap="none"
-          hx-on::after-request="this.classList.add('hidden'); this.reset();">
-          <input type="hidden" name="path" value="${escapeHtml(workspaceFolder)}">
+        <form class="launch-prompt-form hidden" onsubmit="launchAgent(event, '${escapeHtml(cwd)}')">
           <input type="text" name="prompt" class="launch-prompt-input"
-            placeholder="Prompt (optional)..."
-            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}">
+            placeholder="Enter a prompt..."
+            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}"
+            required>
           <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
         </form>
       </div>`;
 
     for (const session of repoSessions) {
       const isActive = session.id === activeSessionId;
-      const slug = session.slug || session.id.slice(0, 8);
+      const slug = session.id.slice(0, 8);
       const preview = session.lastMessagePreview || "No messages yet";
-      const branch = session.gitBranch ? `${escapeHtml(session.gitBranch)}` : "";
+      const totalTokens = session.inputTokens + session.outputTokens;
 
       html += `<div class="session-card${isActive ? " active" : ""}"
         hx-get="/sessions/${session.id}/detail"
@@ -57,8 +55,7 @@ export function renderSidebar(
         </div>
         <div class="session-card-preview">${escapeHtml(preview)}</div>
         <div class="session-card-meta">
-          ${branch ? `<span class="branch">${branch}</span>` : ""}
-          <span class="tokens">${formatTokens(session.totalTokens)}</span>
+          <span class="tokens">${formatTokens(totalTokens)}</span>
         </div>
       </div>`;
     }
@@ -77,13 +74,11 @@ export function renderSidebar(
           <span>${escapeHtml(repo.name)}</span>
           <span class="launch-item-action">+</span>
         </button>
-        <form class="launch-prompt-form hidden"
-          hx-post="/launch" hx-swap="none"
-          hx-on::after-request="this.classList.add('hidden'); this.reset();">
-          <input type="hidden" name="path" value="${escapeHtml(repo.path)}">
+        <form class="launch-prompt-form hidden" onsubmit="launchAgent(event, '${escapeHtml(repo.path)}')">
           <input type="text" name="prompt" class="launch-prompt-input"
-            placeholder="Prompt (optional)..."
-            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}">
+            placeholder="Enter a prompt..."
+            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}"
+            required>
           <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
         </form>
       </div>`;

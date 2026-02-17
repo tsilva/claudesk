@@ -6,6 +6,7 @@
   let notificationsEnabled = false;
   let currentSessionId = null;
   var pendingAnswers = {}; // { questionText: selectedLabel(s) }
+  var seenNotifications = new Set(); // tracks "event:sessionId" keys to suppress replayed notifications
 
 
   // --- Notifications ---
@@ -59,6 +60,19 @@
 
     try {
       var data = JSON.parse(e.detail.data);
+      var sid = data.sessionId || "";
+      var key = (data.event || "") + ":" + sid;
+
+      // "complete" clears all keys for this session so future notifications can fire
+      if (data.event === "complete") {
+        seenNotifications.forEach(function (k) {
+          if (k.endsWith(":" + sid)) seenNotifications.delete(k);
+        });
+      }
+
+      // Skip if we already showed this notification
+      if (seenNotifications.has(key)) return;
+
       var title = "claudesk";
       var body = "";
 
@@ -77,9 +91,11 @@
       }
 
       if (body) {
+        seenNotifications.add(key);
+
         var n = new Notification(title, {
           body: body,
-          tag: "claudesk-" + (data.sessionId || ""),
+          tag: "claudesk-" + sid,
           silent: false,
         });
 
@@ -412,6 +428,7 @@
   };
 
   window.approvePermission = function (sessionId, toolUseId) {
+    seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
@@ -424,6 +441,7 @@
 
   window.denyPermission = function (sessionId, toolUseId) {
     var message = prompt("Denial reason (optional):");
+    seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
@@ -503,6 +521,7 @@
   window.submitQuestionAnswers = function (sessionId) {
     var answers = Object.assign({}, pendingAnswers);
     pendingAnswers = {};
+    seenNotifications.delete("question:" + sessionId);
 
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/answer", {
@@ -517,6 +536,7 @@
   // --- Plan Approval Interaction ---
 
   window.acceptPlan = function (sessionId) {
+    seenNotifications.delete("plan_approval:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/plan-approval", {
       method: "POST",
@@ -534,6 +554,7 @@
       if (input) input.focus();
       return;
     }
+    seenNotifications.delete("plan_approval:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/plan-approval", {
       method: "POST",

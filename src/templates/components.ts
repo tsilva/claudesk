@@ -425,7 +425,7 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
   }
 
   const planBodyHtml = pd.planContent
-    ? `<div class="plan-approval-body">${renderMarkdown(pd.planContent)}</div>`
+    ? `<div class="plan-approval-body markdown-body">${renderMarkdown(pd.planContent)}</div>`
     : "";
 
   return `<div class="message message--plan-approval" id="${msg.id}" data-id="${msg.id}">

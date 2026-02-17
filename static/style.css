@@ -2108,13 +2108,17 @@ button.launch-item {
   overflow-y: auto;
   padding: 10px 12px;
   margin-bottom: 10px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  border-left: 2px solid #5b9cf5;
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
 }
+
+.plan-approval-body h1 { font-size: 1.15em; }
+.plan-approval-body h2 { font-size: 1.05em; }
+.plan-approval-body h3,
+.plan-approval-body h4,
+.plan-approval-body h5,
+.plan-approval-body h6 { font-size: 1em; }
 
 .plan-approval-body > :first-child {
   margin-top: 0;

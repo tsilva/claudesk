@@ -23,9 +23,9 @@ export function renderSidebar(
     const groupCount = pendingCounts?.get(cwd) ?? 0;
     html += `<div class="repo-group" data-repo="${escapeHtml(repoName)}">
       <div class="repo-group-header">
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
         <span>${escapeHtml(repoName)}</span>
         ${groupCount > 0 ? `<span class="pending-commits-badge">${groupCount}</span>` : ""}
-        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
         <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
@@ -68,9 +68,9 @@ export function renderSidebar(
     for (const repo of repos) {
       const repoCount = repo.pendingCommits ?? 0;
       html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeHtml(repo.path)}')">
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>
         ${repoCount > 0 ? `<span class="pending-commits-badge">${repoCount}</span>` : ""}
-        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span class="launch-item-action">+</span>
       </button>`;
     }

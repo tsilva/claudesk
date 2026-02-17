@@ -169,6 +169,25 @@
     }
   });
 
+  // --- SSE Dedup: prevent duplicate messages in conversation stream ---
+
+  document.body.addEventListener("htmx:sseBeforeMessage", function (e) {
+    if (e.detail.type === "stream-append") {
+      var temp = document.createElement("div");
+      temp.innerHTML = e.detail.data;
+      var newMsg = temp.querySelector("[data-id]");
+      if (newMsg) {
+        var existingMsg = document.querySelector(
+          '#conversation-stream [data-id="' + newMsg.getAttribute("data-id") + '"]'
+        );
+        if (existingMsg) {
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+  });
+
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");

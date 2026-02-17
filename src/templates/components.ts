@@ -281,6 +281,9 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
 // --- Message Rendering ---
 
 export function renderMessage(msg: AgentMessage): string | null {
+  if (msg.permissionData) return renderPermissionMessage(msg);
+  if (msg.questionData) return renderQuestionMessage(msg);
+
   switch (msg.type) {
     case "user":
       return renderUserMessage(msg);
@@ -293,6 +296,96 @@ export function renderMessage(msg: AgentMessage): string | null {
     default:
       return null;
   }
+}
+
+function renderPermissionMessage(msg: AgentMessage): string {
+  const pd = msg.permissionData!;
+  const sid = msg.sessionId ?? "";
+
+  if (pd.resolved) {
+    // Compact resolved badge
+    const preview = getToolPreview(pd.toolName, pd.toolInput as Record<string, any>);
+    const badgeClass = pd.resolved === "allowed" ? "permission-badge--allowed"
+      : pd.resolved === "denied" ? "permission-badge--denied"
+      : "permission-badge--timeout";
+    const label = pd.resolved === "allowed" ? "Allowed"
+      : pd.resolved === "denied" ? "Denied"
+      : "Timed Out";
+
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}">
+      <div class="message-content permission-resolved">
+        <span class="tool-icon">$</span>
+        <span class="tool-name">${escapeHtml(pd.toolName)}</span>
+        ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
+        <span class="permission-badge ${badgeClass}">${label}</span>
+      </div>
+    </div>`;
+  }
+
+  // Pending: full permission prompt inline
+  const inputPreview = JSON.stringify(pd.toolInput, null, 2);
+  const displayInput = inputPreview.length > 500
+    ? inputPreview.slice(0, 500) + "\n..."
+    : inputPreview;
+  const preview = getToolPreview(pd.toolName, pd.toolInput as Record<string, any>);
+
+  return `<div class="message message--permission" id="${msg.id}" data-id="${msg.id}">
+    <div class="message-content">
+      <div class="permission-prompt permission-prompt--inline">
+        <div class="permission-prompt-header">
+          <span class="permission-prompt-icon">?</span>
+          <span class="permission-prompt-title">Permission Required</span>
+        </div>
+        <div class="permission-prompt-tool">
+          <span class="tool-icon">$</span>
+          <span class="tool-name">${escapeHtml(pd.toolName)}</span>
+          ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
+        </div>
+        <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
+        <div class="permission-prompt-actions">
+          <button class="btn btn--primary" onclick="approvePermission('${escapeHtml(sid)}')">Allow</button>
+          <button class="btn" onclick="denyPermission('${escapeHtml(sid)}')">Deny</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderQuestionMessage(msg: AgentMessage): string {
+  const qd = msg.questionData!;
+  const sid = msg.sessionId ?? "";
+
+  if (qd.resolved) {
+    // Compact resolved badge
+    const label = qd.resolved === "answered" ? "Answered" : "Timed Out";
+    const badgeClass = qd.resolved === "answered" ? "question-badge--answered" : "question-badge--timeout";
+    const summary = qd.answerSummary ? `: ${qd.answerSummary}` : "";
+    const firstQ = qd.questions[0]?.question ?? "Question";
+
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}">
+      <div class="message-content question-resolved">
+        <span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span>
+        <span class="question-resolved-text">${escapeHtml(firstQ)}</span>
+        <span class="question-badge ${badgeClass}">${escapeHtml(label + summary)}</span>
+      </div>
+    </div>`;
+  }
+
+  // Pending: full question prompt inline — reuse renderQuestionPrompt logic
+  const pending = {
+    toolUseId: "",
+    questions: qd.questions,
+    originalInput: qd.originalInput,
+    resolve: () => {},
+    timeoutId: 0 as any,
+  };
+  const promptHtml = renderQuestionPrompt(pending as any, sid);
+
+  return `<div class="message message--question" id="${msg.id}" data-id="${msg.id}">
+    <div class="message-content">
+      ${promptHtml}
+    </div>
+  </div>`;
 }
 
 function renderUserMessage(msg: AgentMessage): string {

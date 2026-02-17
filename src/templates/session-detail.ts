@@ -1,5 +1,5 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, renderPermissionPrompt, renderQuestionPrompt, modeLabel } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, modeLabel } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
   // Find non-error result message to fold into last assistant message
@@ -30,12 +30,6 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
       <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
         ${renderSessionHeaderStatus(session)}
       </div>
-    </div>
-    <div id="permission-prompt-area" sse-swap="permission-request" hx-swap="innerHTML">
-      ${session.pendingPermission ? renderPermissionPrompt(session.pendingPermission, session.id) : ""}
-    </div>
-    <div id="question-prompt-area" sse-swap="question-request" hx-swap="innerHTML">
-      ${session.pendingQuestion ? renderQuestionPrompt(session.pendingQuestion, session.id) : ""}
     </div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}

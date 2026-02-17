@@ -238,15 +238,6 @@
     }
   });
 
-  // --- DEBUG: Log SSE events for question/permission ---
-
-  document.body.addEventListener("htmx:sseMessage", function (e) {
-    var type = e.detail.type;
-    if (type === "question-request" || type === "permission-request") {
-      console.log("[DEBUG SSE] Received event: " + type + " dataLength=" + (e.detail.data || "").length);
-    }
-  });
-
   // --- SSE Dedup: prevent duplicate messages in conversation stream ---
 
   document.body.addEventListener("htmx:sseBeforeMessage", function (e) {
@@ -255,6 +246,9 @@
       temp.innerHTML = e.detail.data;
       var newMsg = temp.querySelector("[data-id]");
       if (newMsg) {
+        // Allow OOB swaps through — they replace existing elements in-place
+        if (newMsg.hasAttribute("hx-swap-oob")) return;
+
         var existingMsg = document.querySelector(
           '#conversation-stream [data-id="' + newMsg.getAttribute("data-id") + '"]'
         );

@@ -35,6 +35,18 @@ export interface AgentMessage {
   outputTokens?: number;
   isError?: boolean;
   numTurns?: number;
+  sessionId?: string;
+  permissionData?: {
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    resolved?: "allowed" | "denied" | "timed_out";
+  };
+  questionData?: {
+    questions: QuestionItem[];
+    originalInput: Record<string, unknown>;
+    resolved?: "answered" | "timed_out";
+    answerSummary?: string;
+  };
 }
 
 // --- Permission & Question handling ---
@@ -102,6 +114,56 @@ export interface RepoGitStatus {
   uncommitted: number;
   unpulled: number;
   unpushed: number;
+}
+
+// --- Launchable Repos ---
+
+// --- Persisted types (serializable to JSON) ---
+
+export interface PersistedMessage {
+  id: string;
+  type: "user" | "assistant" | "system" | "result";
+  timestamp: string; // ISO 8601
+  contentBlocks?: ContentBlock[];
+  text?: string;
+  userText?: string;
+  durationMs?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  isError?: boolean;
+  numTurns?: number;
+  sessionId?: string;
+  permissionData?: {
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    resolved?: "allowed" | "denied" | "timed_out";
+  };
+  questionData?: {
+    questions: QuestionItem[];
+    originalInput: Record<string, unknown>;
+    resolved?: "answered" | "timed_out";
+    answerSummary?: string;
+  };
+}
+
+export interface PersistedSession {
+  id: string;
+  sdkSessionId: string;
+  repoName: string;
+  cwd: string;
+  status: AgentStatus;
+  lastMessagePreview: string;
+  lastActivity: string; // ISO 8601
+  createdAt: string; // ISO 8601
+  gitBranch: string;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  turnCount: number;
+  model: string;
+  permissionMode: PermissionMode;
+  messages: PersistedMessage[];
 }
 
 // --- Launchable Repos ---

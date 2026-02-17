@@ -6,7 +6,7 @@ import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
-import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderPermissionPrompt, renderQuestionPrompt, renderTurnCompleteFooter } from "./templates/components.ts";
+import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderTurnCompleteFooter } from "./templates/components.ts";
 
 const PORT = 3456;
 
@@ -47,29 +47,28 @@ const agentManager = new AgentManager(
     if (msg.type === "system") {
       console.log(`[DEBUG onMessage] system msg: "${msg.text}" session=${session.id}`);
     }
-    if (msg.type === "system" && msg.text?.startsWith("Permission requested:")) {
-      // Send permission prompt to viewers of this session
-      if (session.pendingPermission) {
-        const html = renderPermissionPrompt(session.pendingPermission, session.id);
-        broadcast("permission-request", html, session.id);
-        broadcast("notify", JSON.stringify({
-          event: "permission",
-          repoName: session.repoName,
-          sessionId: session.id,
-        }));
-      }
-    } else if (msg.type === "system" && msg.text?.startsWith("Question asked:")) {
-      // Send question prompt to viewers of this session
-      if (session.pendingQuestion) {
-        const clientCount = Array.from(clients.values()).filter(c => c.sessionId === session.id).length;
-        console.log(`[DEBUG onMessage] broadcasting question-request to ${clientCount} clients for session=${session.id}`);
-        const html = renderQuestionPrompt(session.pendingQuestion, session.id);
-        broadcast("question-request", html, session.id);
-        broadcast("notify", JSON.stringify({
-          event: "question",
-          repoName: session.repoName,
-          sessionId: session.id,
-        }));
+
+    if (msg.permissionData || msg.questionData) {
+      const html = renderMessage(msg);
+      if (html) {
+        if (msg.permissionData?.resolved || msg.questionData?.resolved) {
+          // Resolved: inject hx-swap-oob to replace existing element in-place
+          const oobHtml = html.replace(/^<div /, '<div hx-swap-oob="true" ');
+          broadcast("stream-append", oobHtml, session.id);
+        } else {
+          // Pending: prepend as new message
+          broadcast("stream-append", html, session.id);
+        }
+
+        // Desktop notification for pending prompts
+        if (!msg.permissionData?.resolved && !msg.questionData?.resolved) {
+          const event = msg.permissionData ? "permission" : "question";
+          broadcast("notify", JSON.stringify({
+            event,
+            repoName: session.repoName,
+            sessionId: session.id,
+          }));
+        }
       }
     } else if (msg.type === "result" && !msg.isError) {
       const footerHtml = renderTurnCompleteFooter(msg);
@@ -96,14 +95,6 @@ const agentManager = new AgentManager(
       if (!session) continue;
       const html = renderSessionHeaderStatus(session);
       client.send("session-status", html);
-
-      // Clear prompt UI when pending state is resolved (e.g. by timeout or user response)
-      if (!session.pendingPermission) {
-        client.send("permission-request", "");
-      }
-      if (!session.pendingQuestion) {
-        client.send("question-request", "");
-      }
     }
   }
 );
@@ -301,8 +292,6 @@ app.post("/api/agents/:id/permission", async (c) => {
     const body = await c.req.json<{ allow: boolean; message?: string }>();
 
     agentManager.respondToPermission(id, body.allow, body.message);
-    // Clear the permission prompt for viewers
-    broadcast("permission-request", "", id);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
@@ -316,8 +305,6 @@ app.post("/api/agents/:id/answer", async (c) => {
     const body = await c.req.json<{ answers: Record<string, string> }>();
 
     agentManager.answerQuestion(id, body.answers);
-    // Clear the question prompt for viewers
-    broadcast("question-request", "", id);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
@@ -333,28 +320,33 @@ app.post("/api/debug/test-question", async (c) => {
   const session = agentManager.getSession(sessionId);
   if (!session) return c.json({ error: "session not found" }, 404);
 
-  const fakeQuestion = {
-    toolUseId: "debug-test",
-    questions: [
-      {
-        question: "Which language do you prefer?",
-        header: "Language",
-        options: [
-          { label: "TypeScript", description: "Typed JavaScript" },
-          { label: "Python", description: "General purpose" },
-          { label: "Rust", description: "Systems programming" },
-        ],
-        multiSelect: false,
-      },
-    ],
-    originalInput: {},
-    resolve: () => {},
+  const fakeMsg: AgentMessage = {
+    id: `q-debug-test`,
+    type: "system",
+    timestamp: new Date(),
+    text: "Debug question test",
+    sessionId,
+    questionData: {
+      questions: [
+        {
+          question: "Which language do you prefer?",
+          header: "Language",
+          options: [
+            { label: "TypeScript", description: "Typed JavaScript" },
+            { label: "Python", description: "General purpose" },
+            { label: "Rust", description: "Systems programming" },
+          ],
+          multiSelect: false,
+        },
+      ],
+      originalInput: {},
+    },
   };
 
-  const html = renderQuestionPrompt(fakeQuestion as any, sessionId);
+  const html = renderMessage(fakeMsg);
   const clientCount = Array.from(clients.values()).filter(cl => cl.sessionId === sessionId).length;
   console.log(`[DEBUG test-question] broadcasting to ${clientCount} clients for session=${sessionId}`);
-  broadcast("question-request", html, sessionId);
+  if (html) broadcast("stream-append", html, sessionId);
   return c.json({ ok: true, clientCount });
 });
 
@@ -378,6 +370,8 @@ app.post("/api/agents/:id/stop", async (c) => {
 });
 
 // --- Start ---
+
+await agentManager.init();
 
 export default {
   port: PORT,

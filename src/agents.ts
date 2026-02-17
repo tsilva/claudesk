@@ -15,6 +15,12 @@ import type {
   PermissionResult,
   PermissionMode,
 } from "./types.ts";
+import {
+  ensureDataDir,
+  saveSession,
+  loadAllSessions,
+  deleteSessionFile,
+} from "./persistence.ts";
 
 // --- Constants ---
 
@@ -79,11 +85,54 @@ export class AgentManager {
   private onSessionChange: SessionChangeCallback;
   private launchableRepos: LaunchableRepo[] = [];
   private lastBroadcast = new Map<string, number>();
+  private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
     this.onSessionChange = onSessionChange;
     this.scanLaunchableRepos();
+  }
+
+  // --- Initialization ---
+
+  async init(): Promise<void> {
+    await ensureDataDir();
+    const restored = await loadAllSessions();
+    for (const session of restored) {
+      this.sessions.set(session.id, session);
+    }
+    if (restored.length > 0) {
+      console.log(`[persistence] restored ${restored.length} session(s)`);
+      this.onSessionChange(this.getSessions());
+    }
+  }
+
+  // --- Persistence ---
+
+  private persistSession(sessionId: string, immediate = false): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    if (immediate) {
+      const existing = this.persistTimers.get(sessionId);
+      if (existing) {
+        clearTimeout(existing);
+        this.persistTimers.delete(sessionId);
+      }
+      saveSession(session).catch((err) =>
+        console.warn(`[persistence] save failed for ${sessionId}:`, err)
+      );
+      return;
+    }
+
+    if (this.persistTimers.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this.persistTimers.delete(sessionId);
+      saveSession(session).catch((err) =>
+        console.warn(`[persistence] save failed for ${sessionId}:`, err)
+      );
+    }, 2000);
+    this.persistTimers.set(sessionId, timer);
   }
 
   // --- Public API ---
@@ -114,6 +163,7 @@ export class AgentManager {
     };
 
     this.sessions.set(id, session);
+    this.persistSession(id, true);
     this.onSessionChange(this.getSessions());
 
     return session;
@@ -145,6 +195,7 @@ export class AgentManager {
     session.lastMessagePreview = text.slice(0, 80);
     session.lastActivity = new Date();
     session.status = "streaming";
+    this.persistSession(sessionId);
     this.onMessage(userMsg, session);
     this.onSessionChange(this.getSessions());
 
@@ -179,6 +230,14 @@ export class AgentManager {
 
     const pending = session.pendingPermission;
     clearTimeout(pending.timeoutId);
+
+    // Update the inline permission message to show resolved state
+    const permMsg = session.messages.find(m => m.id === `perm-${pending.toolUseId}`);
+    if (permMsg?.permissionData) {
+      permMsg.permissionData.resolved = allow ? "allowed" : "denied";
+      this.onMessage(permMsg, session);
+    }
+
     session.pendingPermission = null;
     session.status = "streaming";
     this.onSessionChange(this.getSessions());
@@ -196,23 +255,18 @@ export class AgentManager {
 
     const pending = session.pendingQuestion;
     clearTimeout(pending.timeoutId);
-    session.pendingQuestion = null;
-    session.status = "streaming";
 
-    // Show the user's answer in the conversation
+    // Update the inline question message to show answered state
     const answerText = Object.values(answers).filter(Boolean).join(", ");
-    if (answerText) {
-      const answerMsg: AgentMessage = {
-        id: crypto.randomUUID(),
-        type: "user",
-        timestamp: new Date(),
-        text: answerText,
-        userText: answerText,
-      };
-      session.messages.push(answerMsg);
-      this.onMessage(answerMsg, session);
+    const qMsg = session.messages.find(m => m.id === `q-${pending.toolUseId}`);
+    if (qMsg?.questionData) {
+      qMsg.questionData.resolved = "answered";
+      qMsg.questionData.answerSummary = answerText || "Answered";
+      this.onMessage(qMsg, session);
     }
 
+    session.pendingQuestion = null;
+    session.status = "streaming";
     this.onSessionChange(this.getSessions());
 
     pending.resolve({
@@ -242,6 +296,7 @@ export class AgentManager {
     if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
     session.pendingPermission = null;
     session.pendingQuestion = null;
+    this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
   }
 
@@ -253,6 +308,7 @@ export class AgentManager {
     if (q && typeof (q as any).setPermissionMode === "function") {
       await (q as any).setPermissionMode(mode);
     }
+    this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
   }
 
@@ -268,6 +324,7 @@ export class AgentManager {
     const q = this.queries.get(sessionId);
     if (q) q.close();
 
+    deleteSessionFile(sessionId);
     this.sessions.delete(sessionId);
     this.queries.delete(sessionId);
     this.abortControllers.delete(sessionId);
@@ -321,6 +378,7 @@ export class AgentManager {
           isError: true,
         };
         s.messages.push(errorMsg);
+        this.persistSession(sessionId, true);
         this.onMessage(errorMsg, s);
         this.onSessionChange(this.getSessions());
       }
@@ -337,6 +395,7 @@ export class AgentManager {
           session.sdkSessionId = msg.session_id;
           session.status = "streaming";
           session.model = (msg as any).model ?? session.model;
+          this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());
         }
         break;
@@ -413,6 +472,7 @@ export class AgentManager {
         };
 
         session.messages.push(agentMsg);
+        this.persistSession(sessionId);
         this.onMessage(agentMsg, session);
         this.onSessionChange(this.getSessions());
         break;
@@ -437,6 +497,7 @@ export class AgentManager {
             isError: false,
           };
           session.messages.push(agentMsg);
+          this.persistSession(sessionId, true);
           this.onMessage(agentMsg, session);
         } else {
           session.status = "error";
@@ -448,6 +509,7 @@ export class AgentManager {
             isError: true,
           };
           session.messages.push(agentMsg);
+          this.persistSession(sessionId, true);
           this.onMessage(agentMsg, session);
         }
 
@@ -500,14 +562,12 @@ export class AgentManager {
         session.pendingPermission = null;
         session.status = "streaming";
 
-        const timeoutMsg: AgentMessage = {
-          id: crypto.randomUUID(),
-          type: "system",
-          timestamp: new Date(),
-          text: `Permission for ${toolName} auto-denied after 5 minute timeout`,
-        };
-        session.messages.push(timeoutMsg);
-        this.onMessage(timeoutMsg, session);
+        // Update the inline permission message to show timed out state
+        const permMsg = session.messages.find(m => m.id === `perm-${toolUseId}`);
+        if (permMsg?.permissionData) {
+          permMsg.permissionData.resolved = "timed_out";
+          this.onMessage(permMsg, session);
+        }
         this.onSessionChange(this.getSessions());
 
         safeResolve({ behavior: "deny", message: "Permission timed out after 5 minutes" });
@@ -523,13 +583,16 @@ export class AgentManager {
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
 
-      // Emit permission request as a message so it shows in the UI
+      // Emit permission request as an inline message with deterministic ID
       const permMsg: AgentMessage = {
-        id: crypto.randomUUID(),
+        id: `perm-${toolUseId}`,
         type: "system",
         timestamp: new Date(),
         text: `Permission requested: ${toolName}`,
+        sessionId,
+        permissionData: { toolName, toolInput: input },
       };
+      session.messages.push(permMsg);
       this.onMessage(permMsg, session);
     });
   }
@@ -570,14 +633,12 @@ export class AgentManager {
         session.pendingQuestion = null;
         session.status = "streaming";
 
-        const timeoutMsg: AgentMessage = {
-          id: crypto.randomUUID(),
-          type: "system",
-          timestamp: new Date(),
-          text: `Question "${firstQuestion}" auto-denied after 5 minute timeout`,
-        };
-        session.messages.push(timeoutMsg);
-        this.onMessage(timeoutMsg, session);
+        // Update the inline question message to show timed out state
+        const qMsg = session.messages.find(m => m.id === `q-${toolUseId}`);
+        if (qMsg?.questionData) {
+          qMsg.questionData.resolved = "timed_out";
+          this.onMessage(qMsg, session);
+        }
         this.onSessionChange(this.getSessions());
 
         safeResolve({ behavior: "deny", message: "Question timed out after 5 minutes" });
@@ -593,14 +654,18 @@ export class AgentManager {
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
 
-      const sysMsg: AgentMessage = {
-        id: crypto.randomUUID(),
+      // Emit question as an inline message with deterministic ID
+      const qMsg: AgentMessage = {
+        id: `q-${toolUseId}`,
         type: "system",
         timestamp: new Date(),
         text: `Question asked: ${firstQuestion}`,
+        sessionId: session.id,
+        questionData: { questions, originalInput: input },
       };
-      this.onMessage(sysMsg, session);
-      console.log(`[DEBUG handleAskUserQuestion] dispatched system message for session=${session.id}`);
+      session.messages.push(qMsg);
+      this.onMessage(qMsg, session);
+      console.log(`[DEBUG handleAskUserQuestion] dispatched inline question message for session=${session.id}`);
     });
   }
 

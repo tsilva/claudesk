@@ -38,6 +38,19 @@
     if (status) status.textContent = "Off";
   }
 
+  // Auto-enable notifications on load
+  if ("Notification" in window) {
+    if (Notification.permission === "granted") {
+      enableNotifications();
+    } else if (Notification.permission === "default") {
+      Notification.requestPermission().then(function (perm) {
+        if (perm === "granted") {
+          enableNotifications();
+        }
+      });
+    }
+  }
+
   // --- SSE Notification Handler ---
 
   document.body.addEventListener("sse:notify", function (e) {

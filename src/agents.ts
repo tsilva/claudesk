@@ -347,6 +347,19 @@ export class AgentManager {
     return this.launchableRepos;
   }
 
+  getSessionsNeedingAttention(): { sessionId: string; repoName: string; type: "permission" | "question" }[] {
+    const result: { sessionId: string; repoName: string; type: "permission" | "question" }[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.status !== "needs_input") continue;
+      if (session.pendingPermission) {
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "permission" });
+      } else if (session.pendingQuestion) {
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "question" });
+      }
+    }
+    return result;
+  }
+
   getRecentMessages(sessionId: string, count = 50): AgentMessage[] {
     const session = this.sessions.get(sessionId);
     if (!session) return [];

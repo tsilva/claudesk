@@ -41,6 +41,9 @@ async function broadcastSidebar() {
 
 // --- Agent Manager ---
 
+// Track previous session statuses for transition detection
+const prevStatuses = new Map<string, string>();
+
 const agentManager = new AgentManager(
   // onMessage callback
   (msg: AgentMessage, session: AgentSession) => {
@@ -86,7 +89,20 @@ const agentManager = new AgentManager(
     }
   },
   // onSessionChange callback
-  (_sessions: AgentSession[]) => {
+  (sessions: AgentSession[]) => {
+    // Detect streaming/starting → idle transitions for completion notifications
+    for (const session of sessions) {
+      const prev = prevStatuses.get(session.id);
+      if ((prev === "streaming" || prev === "starting") && session.status === "idle") {
+        broadcast("notify", JSON.stringify({
+          event: "complete",
+          repoName: session.repoName,
+          sessionId: session.id,
+        }));
+      }
+      prevStatuses.set(session.id, session.status);
+    }
+
     broadcastSidebar();
     // Update session header status for viewers of each session
     for (const client of clients.values()) {
@@ -146,6 +162,15 @@ app.get("/events", (c) => {
     const pendingCounts = await agentManager.getRepoPendingCounts();
     const sidebarHtml = renderSidebar(sessions, repos, sessionId ?? undefined, pendingCounts);
     client.send("sidebar", sidebarHtml);
+
+    // Replay pending notifications for sessions needing attention
+    for (const pending of agentManager.getSessionsNeedingAttention()) {
+      client.send("notify", JSON.stringify({
+        event: pending.type,
+        repoName: pending.repoName,
+        sessionId: pending.sessionId,
+      }));
+    }
 
     // Keep-alive ping every 15s
     const keepAlive = setInterval(() => {

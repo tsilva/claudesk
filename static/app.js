@@ -28,26 +28,27 @@
 
   function enableNotifications() {
     notificationsEnabled = true;
+    localStorage.setItem("claudesk-notifications", "on");
     var status = document.getElementById("notif-status");
     if (status) status.textContent = "On";
   }
 
   function disableNotifications() {
     notificationsEnabled = false;
+    localStorage.setItem("claudesk-notifications", "off");
     var status = document.getElementById("notif-status");
     if (status) status.textContent = "Off";
   }
 
-  // Auto-enable notifications on load
+  // Restore notification preference from localStorage, falling back to browser permission
   if ("Notification" in window) {
-    if (Notification.permission === "granted") {
+    var savedNotifPref = localStorage.getItem("claudesk-notifications");
+    if (savedNotifPref === "on" && Notification.permission === "granted") {
       enableNotifications();
-    } else if (Notification.permission === "default") {
-      Notification.requestPermission().then(function (perm) {
-        if (perm === "granted") {
-          enableNotifications();
-        }
-      });
+    } else if (savedNotifPref === "off") {
+      // Explicitly disabled — leave off
+    } else if (Notification.permission === "granted") {
+      enableNotifications();
     }
   }
 
@@ -67,6 +68,9 @@
       } else if (data.event === "question") {
         title = data.repoName || "Agent";
         body = "Question needs your answer";
+      } else if (data.event === "complete") {
+        title = data.repoName || "Agent";
+        body = "Task completed";
       }
 
       if (body) {
@@ -249,6 +253,16 @@
         // Allow OOB swaps through — they replace existing elements in-place
         if (newMsg.hasAttribute("hx-swap-oob")) return;
 
+        // Replace optimistic user message with real server echo
+        if (newMsg.classList.contains("message--user")) {
+          var optimistic = document.getElementById("optimistic-user-msg");
+          if (optimistic) {
+            optimistic.replaceWith(newMsg);
+            e.preventDefault();
+            return;
+          }
+        }
+
         var existingMsg = document.querySelector(
           '#conversation-stream [data-id="' + newMsg.getAttribute("data-id") + '"]'
         );
@@ -369,6 +383,7 @@
     var btn = form.querySelector(".message-send-btn");
     if (btn) btn.disabled = true;
 
+    createOptimisticUserMessage(text);
     showTypingIndicator();
 
     var container = document.getElementById("conversation-stream");
@@ -538,6 +553,24 @@
       body: JSON.stringify({ mode: nextMode })
     });
   };
+
+  // --- Optimistic User Message ---
+
+  function escapeHtmlClient(str) {
+    var div = document.createElement("div");
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  function createOptimisticUserMessage(text) {
+    var container = document.getElementById("conversation-stream");
+    if (!container) return;
+    var msg = document.createElement("div");
+    msg.className = "message message--user";
+    msg.id = "optimistic-user-msg";
+    msg.innerHTML = '<div class="message-content">' + escapeHtmlClient(text) + '</div>';
+    container.prepend(msg);
+  }
 
   // --- Typing Indicator ---
 

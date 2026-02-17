@@ -51,10 +51,10 @@ const agentManager = new AgentManager(
       console.log(`[DEBUG onMessage] system msg: "${msg.text}" session=${session.id}`);
     }
 
-    if (msg.permissionData || msg.questionData) {
+    if (msg.permissionData || msg.questionData || msg.planApprovalData) {
       const html = renderMessage(msg);
       if (html) {
-        if (msg.permissionData?.resolved || msg.questionData?.resolved) {
+        if (msg.permissionData?.resolved || msg.questionData?.resolved || msg.planApprovalData?.resolved) {
           // Resolved: inject hx-swap-oob to replace existing element in-place
           const oobHtml = html.replace(/^<div /, '<div hx-swap-oob="true" ');
           broadcast("stream-append", oobHtml, session.id);
@@ -64,8 +64,8 @@ const agentManager = new AgentManager(
         }
 
         // Desktop notification for pending prompts
-        if (!msg.permissionData?.resolved && !msg.questionData?.resolved) {
-          const event = msg.permissionData ? "permission" : "question";
+        if (!msg.permissionData?.resolved && !msg.questionData?.resolved && !msg.planApprovalData?.resolved) {
+          const event = msg.planApprovalData ? "plan_approval" : msg.permissionData ? "permission" : "question";
           broadcast("notify", JSON.stringify({
             event,
             repoName: session.repoName,
@@ -314,9 +314,9 @@ app.post("/api/agents/:id/message", async (c) => {
 app.post("/api/agents/:id/permission", async (c) => {
   try {
     const id = c.req.param("id");
-    const body = await c.req.json<{ allow: boolean; message?: string }>();
+    const body = await c.req.json<{ allow: boolean; message?: string; toolUseId?: string }>();
 
-    agentManager.respondToPermission(id, body.allow, body.message);
+    agentManager.respondToPermission(id, body.allow, body.message, body.toolUseId);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
@@ -330,6 +330,19 @@ app.post("/api/agents/:id/answer", async (c) => {
     const body = await c.req.json<{ answers: Record<string, string> }>();
 
     agentManager.answerQuestion(id, body.answers);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
+});
+
+// Respond to a plan approval
+app.post("/api/agents/:id/plan-approval", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const body = await c.req.json<{ accept: boolean; feedback?: string }>();
+
+    agentManager.respondToPlanApproval(id, body.accept, body.feedback);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);

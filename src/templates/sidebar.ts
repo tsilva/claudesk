@@ -72,12 +72,15 @@ export function renderSidebar(
     html += `</div>`;
   }
 
-  // Launch section
-  if (repos.length > 0) {
+  // Launch section — only repos without active sessions
+  const reposWithSessions = new Set(groups.keys());
+  const launchRepos = repos.filter(repo => !reposWithSessions.has(repo.name));
+
+  if (launchRepos.length > 0) {
     html += `<div class="launch-section">
       <div class="launch-section-header">Launch</div>`;
 
-    for (const repo of repos) {
+    for (const repo of launchRepos) {
       html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeHtml(repo.path)}')">
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>

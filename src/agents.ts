@@ -11,6 +11,7 @@ import type {
   RepoGitStatus,
   PendingPermission,
   PendingQuestion,
+  PendingPlanApproval,
   QuestionItem,
   PermissionResult,
   PermissionMode,
@@ -158,7 +159,8 @@ export class AgentManager {
       model: model || "claude-opus-4-6",
       permissionMode: permissionMode || "default",
       pendingQuestion: null,
-      pendingPermission: null,
+      pendingPlanApproval: null,
+      pendingPermissions: new Map(),
       messages: [],
     };
 
@@ -224,11 +226,21 @@ export class AgentManager {
     this.consumeStream(sessionId, q);
   }
 
-  respondToPermission(sessionId: string, allow: boolean, message?: string): void {
+  respondToPermission(sessionId: string, allow: boolean, message?: string, toolUseId?: string): void {
     const session = this.sessions.get(sessionId);
-    if (!session?.pendingPermission) return;
+    if (!session) return;
 
-    const pending = session.pendingPermission;
+    // Find the right pending permission by toolUseId, or fall back to first one
+    let pending: PendingPermission | undefined;
+    if (toolUseId) {
+      pending = session.pendingPermissions.get(toolUseId);
+    } else {
+      // Legacy fallback: resolve the first pending permission
+      const first = session.pendingPermissions.values().next();
+      if (!first.done) pending = first.value;
+    }
+    if (!pending) return;
+
     clearTimeout(pending.timeoutId);
 
     // Update the inline permission message to show resolved state
@@ -238,8 +250,12 @@ export class AgentManager {
       this.onMessage(permMsg, session);
     }
 
-    session.pendingPermission = null;
-    session.status = "streaming";
+    session.pendingPermissions.delete(pending.toolUseId);
+
+    // Only transition to streaming if no more pending permissions/questions/plan approvals
+    if (session.pendingPermissions.size === 0 && !session.pendingQuestion && !session.pendingPlanApproval) {
+      session.status = "streaming";
+    }
     this.onSessionChange(this.getSessions());
 
     if (allow) {
@@ -275,6 +291,34 @@ export class AgentManager {
     });
   }
 
+  respondToPlanApproval(sessionId: string, accept: boolean, feedback?: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session?.pendingPlanApproval) return;
+
+    const pending = session.pendingPlanApproval;
+    clearTimeout(pending.timeoutId);
+
+    // Update the inline plan approval message to show resolved state
+    const planMsg = session.messages.find(m => m.id === `plan-${pending.toolUseId}`);
+    if (planMsg?.planApprovalData) {
+      planMsg.planApprovalData.resolved = accept ? "accepted" : "revised";
+      if (!accept && feedback) {
+        planMsg.planApprovalData.reviseFeedback = feedback;
+      }
+      this.onMessage(planMsg, session);
+    }
+
+    session.pendingPlanApproval = null;
+    session.status = "streaming";
+    this.onSessionChange(this.getSessions());
+
+    if (accept) {
+      pending.resolve({ behavior: "allow" });
+    } else {
+      pending.resolve({ behavior: "deny", message: feedback || "User requested revision" });
+    }
+  }
+
   stopAgent(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -292,10 +336,14 @@ export class AgentManager {
     }
 
     session.status = "stopped";
-    if (session.pendingPermission) clearTimeout(session.pendingPermission.timeoutId);
+    for (const perm of session.pendingPermissions.values()) {
+      clearTimeout(perm.timeoutId);
+    }
+    session.pendingPermissions.clear();
     if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
-    session.pendingPermission = null;
     session.pendingQuestion = null;
+    if (session.pendingPlanApproval) clearTimeout(session.pendingPlanApproval.timeoutId);
+    session.pendingPlanApproval = null;
     this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
   }
@@ -316,8 +364,12 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
-    if (session.pendingPermission) clearTimeout(session.pendingPermission.timeoutId);
+    for (const perm of session.pendingPermissions.values()) {
+      clearTimeout(perm.timeoutId);
+    }
+    session.pendingPermissions.clear();
     if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
+    if (session.pendingPlanApproval) clearTimeout(session.pendingPlanApproval.timeoutId);
 
     const controller = this.abortControllers.get(sessionId);
     if (controller) controller.abort();
@@ -347,11 +399,13 @@ export class AgentManager {
     return this.launchableRepos;
   }
 
-  getSessionsNeedingAttention(): { sessionId: string; repoName: string; type: "permission" | "question" }[] {
-    const result: { sessionId: string; repoName: string; type: "permission" | "question" }[] = [];
+  getSessionsNeedingAttention(): { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval" }[] {
+    const result: { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval" }[] = [];
     for (const session of this.sessions.values()) {
       if (session.status !== "needs_input") continue;
-      if (session.pendingPermission) {
+      if (session.pendingPlanApproval) {
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "plan_approval" });
+      } else if (session.pendingPermissions.size > 0) {
         result.push({ sessionId: session.id, repoName: session.repoName, type: "permission" });
       } else if (session.pendingQuestion) {
         result.push({ sessionId: session.id, repoName: session.repoName, type: "question" });
@@ -562,6 +616,10 @@ export class AgentManager {
       return this.handleAskUserQuestion(session, input, toolUseId);
     }
 
+    if (toolName === "ExitPlanMode") {
+      return this.handleExitPlanMode(session, input, toolUseId);
+    }
+
     return new Promise((resolve) => {
       let settled = false;
       const safeResolve = (result: { behavior: "allow" } | { behavior: "deny"; message: string }) => {
@@ -572,8 +630,12 @@ export class AgentManager {
 
       const timeoutId = setTimeout(() => {
         if (settled) return;
-        session.pendingPermission = null;
-        session.status = "streaming";
+        session.pendingPermissions.delete(toolUseId);
+
+        // Only change status if no more pending permissions/questions/plan approvals
+        if (session.pendingPermissions.size === 0 && !session.pendingQuestion && !session.pendingPlanApproval) {
+          session.status = "streaming";
+        }
 
         // Update the inline permission message to show timed out state
         const permMsg = session.messages.find(m => m.id === `perm-${toolUseId}`);
@@ -586,13 +648,13 @@ export class AgentManager {
         safeResolve({ behavior: "deny", message: "Permission timed out after 5 minutes" });
       }, PERMISSION_TIMEOUT_MS);
 
-      session.pendingPermission = {
+      session.pendingPermissions.set(toolUseId, {
         toolUseId,
         toolName,
         toolInput: input,
         resolve: safeResolve,
         timeoutId,
-      };
+      });
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
 
@@ -603,7 +665,7 @@ export class AgentManager {
         timestamp: new Date(),
         text: `Permission requested: ${toolName}`,
         sessionId,
-        permissionData: { toolName, toolInput: input },
+        permissionData: { toolName, toolInput: input, toolUseId },
       };
       session.messages.push(permMsg);
       this.onMessage(permMsg, session);
@@ -679,6 +741,65 @@ export class AgentManager {
       session.messages.push(qMsg);
       this.onMessage(qMsg, session);
       console.log(`[DEBUG handleAskUserQuestion] dispatched inline question message for session=${session.id}`);
+    });
+  }
+
+  // --- Plan Approval Handler ---
+
+  private handleExitPlanMode(
+    session: AgentSession,
+    input: Record<string, unknown>,
+    toolUseId: string,
+  ): Promise<PermissionResult> {
+    const rawPrompts = Array.isArray(input.allowedPrompts) ? input.allowedPrompts : [];
+    const allowedPrompts = rawPrompts.map((p: any) => ({
+      tool: "Bash" as const,
+      prompt: String(p.prompt ?? ""),
+    }));
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const safeResolve = (result: PermissionResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        session.pendingPlanApproval = null;
+        session.status = "streaming";
+
+        const planMsg = session.messages.find(m => m.id === `plan-${toolUseId}`);
+        if (planMsg?.planApprovalData) {
+          planMsg.planApprovalData.resolved = "timed_out";
+          this.onMessage(planMsg, session);
+        }
+        this.onSessionChange(this.getSessions());
+
+        safeResolve({ behavior: "deny", message: "Plan approval timed out after 5 minutes" });
+      }, PERMISSION_TIMEOUT_MS);
+
+      session.pendingPlanApproval = {
+        toolUseId,
+        allowedPrompts,
+        originalInput: input,
+        resolve: safeResolve,
+        timeoutId,
+      };
+      session.status = "needs_input";
+      this.onSessionChange(this.getSessions());
+
+      const planMsg: AgentMessage = {
+        id: `plan-${toolUseId}`,
+        type: "system",
+        timestamp: new Date(),
+        text: "Plan ready for review",
+        sessionId: session.id,
+        planApprovalData: { allowedPrompts, toolUseId },
+      };
+      session.messages.push(planMsg);
+      this.onMessage(planMsg, session);
     });
   }
 

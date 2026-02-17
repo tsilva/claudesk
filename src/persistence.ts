@@ -30,6 +30,7 @@ function serializeMessage(msg: AgentMessage): PersistedMessage {
     sessionId: msg.sessionId,
     permissionData: msg.permissionData,
     questionData: msg.questionData,
+    planApprovalData: msg.planApprovalData,
   };
 }
 
@@ -50,6 +51,7 @@ function deserializeMessage(data: PersistedMessage): AgentMessage {
     sessionId: data.sessionId,
     permissionData: data.permissionData,
     questionData: data.questionData,
+    planApprovalData: data.planApprovalData,
   };
 }
 
@@ -91,8 +93,9 @@ export function deserializeSession(data: PersistedSession): AgentSession {
     turnCount: data.turnCount,
     model: data.model,
     permissionMode: data.permissionMode,
-    pendingPermission: null,
+    pendingPermissions: new Map(),
     pendingQuestion: null,
+    pendingPlanApproval: null,
     messages: data.messages.map(deserializeMessage),
   };
 }

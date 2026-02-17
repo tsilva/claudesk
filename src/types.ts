@@ -39,6 +39,7 @@ export interface AgentMessage {
   permissionData?: {
     toolName: string;
     toolInput: Record<string, unknown>;
+    toolUseId: string;
     resolved?: "allowed" | "denied" | "timed_out";
   };
   questionData?: {
@@ -46,6 +47,12 @@ export interface AgentMessage {
     originalInput: Record<string, unknown>;
     resolved?: "answered" | "timed_out";
     answerSummary?: string;
+  };
+  planApprovalData?: {
+    allowedPrompts: { tool: "Bash"; prompt: string }[];
+    toolUseId: string;
+    resolved?: "accepted" | "revised" | "timed_out";
+    reviseFeedback?: string;
   };
 }
 
@@ -81,6 +88,14 @@ export interface PendingQuestion {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+export interface PendingPlanApproval {
+  toolUseId: string;
+  allowedPrompts: { tool: "Bash"; prompt: string }[];
+  originalInput: Record<string, unknown>;
+  resolve: (result: PermissionResult) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
 // --- Permission Mode ---
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'delegate' | 'dontAsk';
@@ -104,7 +119,8 @@ export interface AgentSession {
   model: string;
   permissionMode: PermissionMode;
   pendingQuestion: PendingQuestion | null;
-  pendingPermission: PendingPermission | null;
+  pendingPlanApproval: PendingPlanApproval | null;
+  pendingPermissions: Map<string, PendingPermission>;
   messages: AgentMessage[];
 }
 
@@ -137,6 +153,7 @@ export interface PersistedMessage {
   permissionData?: {
     toolName: string;
     toolInput: Record<string, unknown>;
+    toolUseId: string;
     resolved?: "allowed" | "denied" | "timed_out";
   };
   questionData?: {
@@ -144,6 +161,12 @@ export interface PersistedMessage {
     originalInput: Record<string, unknown>;
     resolved?: "answered" | "timed_out";
     answerSummary?: string;
+  };
+  planApprovalData?: {
+    allowedPrompts: { tool: "Bash"; prompt: string }[];
+    toolUseId: string;
+    resolved?: "accepted" | "revised" | "timed_out";
+    reviseFeedback?: string;
   };
 }
 

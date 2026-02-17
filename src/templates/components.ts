@@ -215,8 +215,8 @@ export function renderPermissionPrompt(permission: PendingPermission, sessionId:
     </div>
     <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
     <div class="permission-prompt-actions">
-      <button class="btn btn--primary" onclick="approvePermission('${sessionId}')">Allow</button>
-      <button class="btn" onclick="denyPermission('${sessionId}')">Deny</button>
+      <button class="btn btn--primary" onclick="approvePermission('${sessionId}', '${escapeHtml(permission.toolUseId)}')">Allow</button>
+      <button class="btn" onclick="denyPermission('${sessionId}', '${escapeHtml(permission.toolUseId)}')">Deny</button>
     </div>
   </div>`;
 }
@@ -283,6 +283,7 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
 export function renderMessage(msg: AgentMessage): string | null {
   if (msg.permissionData) return renderPermissionMessage(msg);
   if (msg.questionData) return renderQuestionMessage(msg);
+  if (msg.planApprovalData) return renderPlanApprovalMessage(msg);
 
   switch (msg.type) {
     case "user":
@@ -301,6 +302,7 @@ export function renderMessage(msg: AgentMessage): string | null {
 function renderPermissionMessage(msg: AgentMessage): string {
   const pd = msg.permissionData!;
   const sid = msg.sessionId ?? "";
+  const toolUseId = pd.toolUseId ?? "";
 
   if (pd.resolved) {
     // Compact resolved badge
@@ -343,8 +345,8 @@ function renderPermissionMessage(msg: AgentMessage): string {
         </div>
         <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
         <div class="permission-prompt-actions">
-          <button class="btn btn--primary" onclick="approvePermission('${escapeHtml(sid)}')">Allow</button>
-          <button class="btn" onclick="denyPermission('${escapeHtml(sid)}')">Deny</button>
+          <button class="btn btn--primary" onclick="approvePermission('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}')">Allow</button>
+          <button class="btn" onclick="denyPermission('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}')">Deny</button>
         </div>
       </div>
     </div>
@@ -384,6 +386,58 @@ function renderQuestionMessage(msg: AgentMessage): string {
   return `<div class="message message--question" id="${msg.id}" data-id="${msg.id}">
     <div class="message-content">
       ${promptHtml}
+    </div>
+  </div>`;
+}
+
+function renderPlanApprovalMessage(msg: AgentMessage): string {
+  const pd = msg.planApprovalData!;
+  const sid = msg.sessionId ?? "";
+
+  if (pd.resolved) {
+    const badgeClass = pd.resolved === "accepted" ? "plan-badge--accepted"
+      : pd.resolved === "revised" ? "plan-badge--revised"
+      : "plan-badge--timeout";
+    const label = pd.resolved === "accepted" ? "Accepted"
+      : pd.resolved === "revised" ? "Revised"
+      : "Timed Out";
+    const feedback = pd.resolved === "revised" && pd.reviseFeedback
+      ? `: ${pd.reviseFeedback}`
+      : "";
+
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}">
+      <div class="message-content plan-approval-resolved">
+        <span class="plan-approval-icon-sm">P</span>
+        <span class="plan-approval-resolved-text">Plan Review</span>
+        <span class="plan-badge ${badgeClass}">${escapeHtml(label + feedback)}</span>
+      </div>
+    </div>`;
+  }
+
+  // Pending: full plan approval prompt inline
+  let promptsHtml = "";
+  if (pd.allowedPrompts.length > 0) {
+    promptsHtml = `<div class="plan-prompts-list">`;
+    for (const p of pd.allowedPrompts) {
+      promptsHtml += `<div class="plan-prompt-item">${escapeHtml(p.prompt)}</div>`;
+    }
+    promptsHtml += `</div>`;
+  }
+
+  return `<div class="message message--plan-approval" id="${msg.id}" data-id="${msg.id}">
+    <div class="message-content">
+      <div class="plan-approval-prompt">
+        <div class="plan-approval-header">
+          <span class="plan-approval-icon">P</span>
+          <span class="plan-approval-title">Plan Ready for Review</span>
+        </div>
+        ${promptsHtml ? `<div class="plan-approval-section-label">Requested permissions:</div>${promptsHtml}` : ""}
+        <div class="plan-approval-actions">
+          <button class="btn btn--plan-accept" onclick="acceptPlan('${escapeHtml(sid)}')">Accept</button>
+          <input type="text" class="plan-revise-input" id="plan-revise-input-${escapeHtml(pd.toolUseId)}" placeholder="Revision feedback..." onkeydown="if(event.key==='Enter'){event.preventDefault();revisePlan('${escapeHtml(sid)}')}">
+          <button class="btn btn--plan-revise" onclick="revisePlan('${escapeHtml(sid)}')">Revise</button>
+        </div>
+      </div>
     </div>
   </div>`;
 }

@@ -62,7 +62,10 @@
       var title = "claudesk";
       var body = "";
 
-      if (data.event === "permission") {
+      if (data.event === "plan_approval") {
+        title = data.repoName || "Agent";
+        body = "Plan ready for review";
+      } else if (data.event === "permission") {
         title = data.repoName || "Agent";
         body = "Permission required";
       } else if (data.event === "question") {
@@ -408,24 +411,24 @@
       });
   };
 
-  window.approvePermission = function (sessionId) {
+  window.approvePermission = function (sessionId, toolUseId) {
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allow: true }),
+      body: JSON.stringify({ allow: true, toolUseId: toolUseId }),
     }).catch(function () {
       removeTypingIndicator();
     });
   };
 
-  window.denyPermission = function (sessionId) {
+  window.denyPermission = function (sessionId, toolUseId) {
     var message = prompt("Denial reason (optional):");
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allow: false, message: message || "User denied" }),
+      body: JSON.stringify({ allow: false, message: message || "User denied", toolUseId: toolUseId }),
     }).catch(function () {
       removeTypingIndicator();
     });
@@ -506,6 +509,36 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers: answers }),
+    }).catch(function () {
+      removeTypingIndicator();
+    });
+  };
+
+  // --- Plan Approval Interaction ---
+
+  window.acceptPlan = function (sessionId) {
+    showTypingIndicator();
+    fetch("/api/agents/" + sessionId + "/plan-approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept: true }),
+    }).catch(function () {
+      removeTypingIndicator();
+    });
+  };
+
+  window.revisePlan = function (sessionId) {
+    var input = document.querySelector(".plan-revise-input");
+    var feedback = input ? input.value.trim() : "";
+    if (!feedback) {
+      if (input) input.focus();
+      return;
+    }
+    showTypingIndicator();
+    fetch("/api/agents/" + sessionId + "/plan-approval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept: false, feedback: feedback }),
     }).catch(function () {
       removeTypingIndicator();
     });

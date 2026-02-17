@@ -93,6 +93,14 @@ const agentManager = new AgentManager(
       if (!session) continue;
       const html = renderSessionHeaderStatus(session);
       client.send("session-status", html);
+
+      // Clear prompt UI when pending state is resolved (e.g. by timeout or user response)
+      if (!session.pendingPermission) {
+        client.send("permission-request", "");
+      }
+      if (!session.pendingQuestion) {
+        client.send("question-request", "");
+      }
     }
   }
 );

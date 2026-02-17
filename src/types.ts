@@ -44,6 +44,7 @@ export interface PendingPermission {
   toolName: string;
   toolInput: Record<string, unknown>;
   resolve: (result: { behavior: "allow" } | { behavior: "deny"; message: string }) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
 }
 
 export interface QuestionOption {
@@ -65,6 +66,7 @@ export interface PendingQuestion {
   questions: QuestionItem[];
   originalInput: Record<string, unknown>;
   resolve: (result: PermissionResult) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
 }
 
 // --- Agent Session ---

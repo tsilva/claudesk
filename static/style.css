@@ -1718,7 +1718,7 @@ button.launch-item {
   align-items: center;
   gap: 4px;
   padding: 10px 14px;
-  margin: 0 16px 2px;
+  margin: 0 16px 2px 0;
   border-left: 3px solid var(--msg-assistant);
   animation: fadeIn 0.15s ease;
 }

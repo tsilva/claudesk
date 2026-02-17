@@ -18,6 +18,7 @@ import type {
 
 const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const ARCHIVED_MARKER = ".archived";
+const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 // --- Git Helpers ---
 
@@ -142,6 +143,7 @@ export class AgentManager {
     if (!session?.pendingPermission) return;
 
     const pending = session.pendingPermission;
+    clearTimeout(pending.timeoutId);
     session.pendingPermission = null;
     session.status = "streaming";
     this.onSessionChange(this.getSessions());
@@ -158,6 +160,7 @@ export class AgentManager {
     if (!session?.pendingQuestion) return;
 
     const pending = session.pendingQuestion;
+    clearTimeout(pending.timeoutId);
     session.pendingQuestion = null;
     session.status = "streaming";
 
@@ -200,6 +203,8 @@ export class AgentManager {
     }
 
     session.status = "stopped";
+    if (session.pendingPermission) clearTimeout(session.pendingPermission.timeoutId);
+    if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
     session.pendingPermission = null;
     session.pendingQuestion = null;
     this.onSessionChange(this.getSessions());
@@ -208,6 +213,9 @@ export class AgentManager {
   dismissSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
+
+    if (session.pendingPermission) clearTimeout(session.pendingPermission.timeoutId);
+    if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
 
     const controller = this.abortControllers.get(sessionId);
     if (controller) controller.abort();
@@ -428,11 +436,37 @@ export class AgentManager {
     }
 
     return new Promise((resolve) => {
+      let settled = false;
+      const safeResolve = (result: { behavior: "allow" } | { behavior: "deny"; message: string }) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        session.pendingPermission = null;
+        session.status = "streaming";
+
+        const timeoutMsg: AgentMessage = {
+          id: crypto.randomUUID(),
+          type: "system",
+          timestamp: new Date(),
+          text: `Permission for ${toolName} auto-denied after 5 minute timeout`,
+        };
+        session.messages.push(timeoutMsg);
+        this.onMessage(timeoutMsg, session);
+        this.onSessionChange(this.getSessions());
+
+        safeResolve({ behavior: "deny", message: "Permission timed out after 5 minutes" });
+      }, PERMISSION_TIMEOUT_MS);
+
       session.pendingPermission = {
         toolUseId,
         toolName,
         toolInput: input,
-        resolve,
+        resolve: safeResolve,
+        timeoutId,
       };
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
@@ -470,16 +504,43 @@ export class AgentManager {
     }));
 
     return new Promise((resolve) => {
+      let settled = false;
+      const safeResolve = (result: PermissionResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      const firstQuestion = questions[0]?.question ?? "Question";
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        session.pendingQuestion = null;
+        session.status = "streaming";
+
+        const timeoutMsg: AgentMessage = {
+          id: crypto.randomUUID(),
+          type: "system",
+          timestamp: new Date(),
+          text: `Question "${firstQuestion}" auto-denied after 5 minute timeout`,
+        };
+        session.messages.push(timeoutMsg);
+        this.onMessage(timeoutMsg, session);
+        this.onSessionChange(this.getSessions());
+
+        safeResolve({ behavior: "deny", message: "Question timed out after 5 minutes" });
+      }, PERMISSION_TIMEOUT_MS);
+
       session.pendingQuestion = {
         toolUseId,
         questions,
         originalInput: input,
-        resolve,
+        resolve: safeResolve,
+        timeoutId,
       };
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
 
-      const firstQuestion = questions[0]?.question ?? "Question";
       const sysMsg: AgentMessage = {
         id: crypto.randomUUID(),
         type: "system",

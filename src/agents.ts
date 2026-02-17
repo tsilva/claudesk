@@ -208,9 +208,9 @@ export class AgentManager {
       abortController,
       permissionMode: session.permissionMode,
       settingSources: ['user', 'project', 'local'],
-      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) => {
+      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
-        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID);
+        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID, opts.suggestions);
       },
     };
     if (session.permissionMode === 'bypassPermissions') {
@@ -310,10 +310,15 @@ export class AgentManager {
 
     session.pendingPlanApproval = null;
     session.status = "streaming";
+
+    if (accept) {
+      session.permissionMode = "default";
+    }
+
     this.onSessionChange(this.getSessions());
 
     if (accept) {
-      pending.resolve({ behavior: "allow" });
+      pending.resolve({ behavior: "allow", updatedPermissions: pending.suggestions });
     } else {
       pending.resolve({ behavior: "deny", message: feedback || "User requested revision" });
     }
@@ -606,6 +611,7 @@ export class AgentManager {
     toolName: string,
     input: Record<string, unknown>,
     toolUseId: string,
+    suggestions?: unknown[],
   ): Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -617,7 +623,7 @@ export class AgentManager {
     }
 
     if (toolName === "ExitPlanMode") {
-      return this.handleExitPlanMode(session, input, toolUseId);
+      return this.handleExitPlanMode(session, input, toolUseId, suggestions);
     }
 
     return new Promise((resolve) => {
@@ -750,6 +756,7 @@ export class AgentManager {
     session: AgentSession,
     input: Record<string, unknown>,
     toolUseId: string,
+    suggestions?: unknown[],
   ): Promise<PermissionResult> {
     const rawPrompts = Array.isArray(input.allowedPrompts) ? input.allowedPrompts : [];
     const allowedPrompts = rawPrompts.map((p: any) => ({
@@ -784,6 +791,7 @@ export class AgentManager {
         toolUseId,
         allowedPrompts,
         originalInput: input,
+        suggestions,
         resolve: safeResolve,
         timeoutId,
       };

@@ -78,7 +78,7 @@ export interface QuestionItem {
   multiSelect: boolean;
 }
 
-export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown> } | { behavior: "deny"; message: string };
+export type PermissionResult = { behavior: "allow"; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } | { behavior: "deny"; message: string };
 
 export interface PendingQuestion {
   toolUseId: string;
@@ -92,6 +92,7 @@ export interface PendingPlanApproval {
   toolUseId: string;
   allowedPrompts: { tool: "Bash"; prompt: string }[];
   originalInput: Record<string, unknown>;
+  suggestions?: unknown[];
   resolve: (result: PermissionResult) => void;
   timeoutId: ReturnType<typeof setTimeout>;
 }

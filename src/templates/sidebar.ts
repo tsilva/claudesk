@@ -53,6 +53,7 @@ export function renderSidebar(
           ${statusDot(session.status)}
           <span class="session-card-slug">${escapeHtml(slug)}</span>
           <span class="session-card-time">${relativeTime(session.lastActivity)}</span>
+          <button class="dismiss-btn" onclick="event.stopPropagation(); dismissSession('${session.id}')" title="Dismiss session">&times;</button>
         </div>
         <div class="session-card-preview">${escapeHtml(preview)}</div>
         <div class="session-card-meta">

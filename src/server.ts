@@ -197,6 +197,14 @@ app.post("/sessions/:id/focus", async (c) => {
   }
 });
 
+// Dismiss (remove) a session
+app.delete("/sessions/:id", async (c) => {
+  const id = c.req.param("id");
+  const found = await sessionManager.dismissSession(id);
+  if (!found) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // Launch Cursor for a repo and open Claude Code in its integrated terminal
 app.post("/launch", async (c) => {
   const body = await c.req.parseBody();

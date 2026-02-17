@@ -20,11 +20,13 @@ export function renderLayout(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>claudesk</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/hljs-theme.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/htmx-sse.js"></script>
 </head>
 <body>
   <div class="app" hx-ext="sse" sse-connect="/events${activeSession ? `?session=${activeSession.id}` : ""}">
+    <div hx-trigger="sse:notify" hx-swap="none" style="display:none"></div>
     <header class="header">
       <div class="header-left">
         <span class="logo">claudesk</span>

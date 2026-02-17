@@ -161,7 +161,10 @@
 
   function saveLaunchFormState() {
     var form = document.querySelector(".launch-prompt-form:not(.hidden)");
-    if (!form) return;
+    if (!form) {
+      savedLaunchFormState = null;
+      return;
+    }
     var pathInput = form.querySelector('input[name="path"]');
     var promptInput = form.querySelector(".launch-prompt-input");
     if (!pathInput) return;
@@ -261,6 +264,18 @@
       restoreLaunchFormState();
     }
   });
+
+  // --- Session Dismiss ---
+
+  window.dismissSession = function (sessionId) {
+    fetch("/sessions/" + sessionId, { method: "DELETE" }).then(function () {
+      if (sessionId === currentSessionId) {
+        currentSessionId = null;
+        var detail = document.getElementById("session-detail");
+        if (detail) detail.innerHTML = "";
+      }
+    });
+  };
 
   // --- Session Switching ---
 

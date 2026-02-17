@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "fs";
-import { readdir, readFile, stat } from "fs/promises";
+import { readdir, readFile, stat, unlink } from "fs/promises";
 import { join, basename } from "path";
 import { homedir } from "os";
 
@@ -101,7 +101,10 @@ const DISCOVERY_INTERVAL = 3000;
 const TAIL_FALLBACK_INTERVAL = 500;
 const PROGRESS_DEBOUNCE_MS = 200;
 const ACTIVITY_WINDOW_MS = 5 * 60 * 1000; // fallback: mtime window when no registry
+const REGISTRY_STALE_MS = 10 * 60 * 1000; // registry-backed sessions with no JSONL activity
 const BIRTH_WINDOW_MS = 30_000; // match JSONL born within 30s of registry startedAt
+const ARCHIVE_CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const ARCHIVED_MARKER = ".archived";
 // --- Helpers ---
 
 function extractPort(lockFileName: string): number | null {
@@ -131,6 +134,7 @@ export class SessionManager {
   private sessions = new Map<string, Session>();
   private tailers = new Map<string, JsonlTailer>();
   private discoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private archiveCheckTimer: ReturnType<typeof setInterval> | null = null;
   private onMessage: MessageCallback;
   private onSessionChange: SessionChangeCallback;
   private launchableRepos: LaunchableRepo[] = [];
@@ -143,10 +147,13 @@ export class SessionManager {
   start() {
     this.discover();
     this.discoveryTimer = setInterval(() => this.discover(), DISCOVERY_INTERVAL);
+    this.refreshArchivedStatus();
+    this.archiveCheckTimer = setInterval(() => this.refreshArchivedStatus(), ARCHIVE_CHECK_INTERVAL);
   }
 
   stop() {
     if (this.discoveryTimer) clearInterval(this.discoveryTimer);
+    if (this.archiveCheckTimer) clearInterval(this.archiveCheckTimer);
     for (const tailer of this.tailers.values()) {
       tailer.stop();
     }
@@ -232,8 +239,16 @@ export class SessionManager {
         try {
           const content = await readFile(join(SESSIONS_DIR, file), "utf-8");
           const data = JSON.parse(content);
-          // Validate PID is still alive
-          try { process.kill(data.pid, 0); } catch { continue; }
+          // Validate PID is still alive — if dead, GC the stale registry file
+          try {
+            process.kill(data.pid, 0);
+          } catch {
+            try {
+              await unlink(join(SESSIONS_DIR, file));
+              console.log(`[registry-gc] deleted stale ${file} (pid ${data.pid} dead)`);
+            } catch { /* already gone */ }
+            continue;
+          }
           entries.push({ ...data, file });
         } catch {
           // skip corrupt/unreadable
@@ -452,10 +467,22 @@ export class SessionManager {
 
     for (const [id, session] of this.sessions) {
       if (session.registryFile) {
-        // Registry-backed: remove if registry file is gone
         if (!activeRegistryFiles.has(session.registryFile)) {
+          // Registry-backed: remove if registry file is gone (PID dead)
           this.removeSession(id);
           changed = true;
+        } else {
+          // PID alive but check JSONL staleness — remove idle sessions after timeout
+          try {
+            const s = await stat(session.jsonlPath);
+            if (now - s.mtimeMs >= REGISTRY_STALE_MS) {
+              this.removeSession(id);
+              changed = true;
+            }
+          } catch {
+            this.removeSession(id);
+            changed = true;
+          }
         }
       } else {
         // Lock-backed fallback: remove if workspace gone OR JSONL stale
@@ -550,6 +577,22 @@ export class SessionManager {
     this.onMessage(msg, session);
   }
 
+  async dismissSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    // Delete registry file to prevent re-discovery
+    if (session.registryFile) {
+      try {
+        await unlink(join(SESSIONS_DIR, session.registryFile));
+      } catch { /* already gone */ }
+    }
+
+    this.removeSession(sessionId);
+    this.onSessionChange(this.getSessions());
+    return true;
+  }
+
   setSessionStatus(sessionId: string, status: SessionStatus) {
     const session = this.sessions.get(sessionId);
     if (session) {
@@ -600,15 +643,79 @@ export class SessionManager {
         if (activeWorkspaces.has(repoPath)) continue;
         try {
           await stat(join(repoPath, ".git"));
-          repos.push({ name: entry.name, path: repoPath });
         } catch {
-          // No .git — skip
+          continue; // No .git — skip
         }
+        try {
+          await stat(join(repoPath, ARCHIVED_MARKER));
+          continue; // archived — skip
+        } catch {}
+        repos.push({ name: entry.name, path: repoPath });
       }
 
       this.launchableRepos = repos.sort((a, b) => a.name.localeCompare(b.name));
     } catch {
       this.launchableRepos = [];
+    }
+  }
+
+  private async refreshArchivedStatus() {
+    try {
+      const entries = await readdir(REPOS_DIR, { withFileTypes: true });
+      const toCheck: { name: string; path: string }[] = [];
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const repoPath = join(REPOS_DIR, entry.name);
+        try {
+          await stat(join(repoPath, ".git"));
+        } catch {
+          continue; // not a git repo
+        }
+        try {
+          await stat(join(repoPath, ARCHIVED_MARKER));
+          continue; // already marked
+        } catch {}
+        toCheck.push({ name: entry.name, path: repoPath });
+      }
+
+      if (toCheck.length === 0) return;
+
+      const results = await Promise.allSettled(
+        toCheck.map((repo) => this.checkIfArchived(repo.name, repo.path))
+      );
+
+      const anyNewlyMarked = results.some(
+        (r) => r.status === "fulfilled" && r.value === true
+      );
+
+      if (anyNewlyMarked) {
+        await this.scanLaunchableRepos();
+        this.onSessionChange(this.getSessions());
+      }
+    } catch {
+      // fail open
+    }
+  }
+
+  private async checkIfArchived(repoName: string, repoPath: string): Promise<boolean> {
+    try {
+      const proc = Bun.spawn(
+        ["gh", "repo", "view", `tsilva/${repoName}`, "--json", "isArchived"],
+        { stdout: "pipe", stderr: "ignore" }
+      );
+      const output = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) return false;
+
+      const data = JSON.parse(output);
+      if (data.isArchived === true) {
+        await Bun.write(join(repoPath, ARCHIVED_MARKER), "");
+        return true;
+      }
+      return false;
+    } catch {
+      return false; // fail open
     }
   }
 }

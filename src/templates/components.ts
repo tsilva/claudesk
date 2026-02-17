@@ -1,4 +1,5 @@
 import type { Session, SessionStatus, ParsedMessage, ContentBlock } from "../sessions.ts";
+import { renderMarkdown } from "../markdown.ts";
 
 // --- Escaping ---
 
@@ -169,7 +170,7 @@ function renderContentBlock(block: ContentBlock): string {
     case "text": {
       const text = block.text ?? "";
       if (!text.trim()) return "";
-      return `<div class="content-block content-block--text">${escapeHtml(text)}</div>`;
+      return `<div class="content-block content-block--text markdown-body">${renderMarkdown(text)}</div>`;
     }
 
     case "thinking": {
@@ -178,7 +179,7 @@ function renderContentBlock(block: ContentBlock): string {
       const preview = text.slice(0, 100).replace(/\n/g, " ");
       return `<details class="thinking-block">
         <summary>Thinking: ${escapeHtml(preview)}${text.length > 100 ? "..." : ""}</summary>
-        <div class="thinking-block-content">${escapeHtml(text)}</div>
+        <div class="thinking-block-content markdown-body">${renderMarkdown(text)}</div>
       </details>`;
     }
 

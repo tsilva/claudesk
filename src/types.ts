@@ -94,4 +94,5 @@ export interface AgentSession {
 export interface LaunchableRepo {
   name: string;
   path: string;
+  pendingCommits?: number;
 }

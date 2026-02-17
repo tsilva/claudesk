@@ -4,7 +4,8 @@ import { escapeHtml, statusDot, relativeTime, formatTokens } from "./components.
 export function renderSidebar(
   sessions: AgentSession[],
   repos: LaunchableRepo[],
-  activeSessionId?: string
+  activeSessionId?: string,
+  pendingCounts?: Map<string, number>
 ): string {
   // Group sessions by repo
   const groups = new Map<string, AgentSession[]>();
@@ -19,9 +20,12 @@ export function renderSidebar(
   // Session groups
   for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const cwd = repoSessions[0]?.cwd ?? "";
-    html += `<div class="repo-group">
+    const groupCount = pendingCounts?.get(cwd) ?? 0;
+    html += `<div class="repo-group" data-repo="${escapeHtml(repoName)}">
       <div class="repo-group-header">
         <span>${escapeHtml(repoName)}</span>
+        ${groupCount > 0 ? `<span class="pending-commits-badge">${groupCount}</span>` : ""}
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
         <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
@@ -62,8 +66,11 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of repos) {
-      html += `<button class="launch-item" onclick="createSession('${escapeHtml(repo.path)}')">
+      const repoCount = repo.pendingCommits ?? 0;
+      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeHtml(repo.path)}')">
         <span>${escapeHtml(repo.name)}</span>
+        ${repoCount > 0 ? `<span class="pending-commits-badge">${repoCount}</span>` : ""}
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span class="launch-item-action">+</span>
       </button>`;
     }

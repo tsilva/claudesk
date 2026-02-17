@@ -29,11 +29,12 @@ function broadcast(event: string, data: string, sessionFilter?: string) {
   }
 }
 
-function broadcastSidebar() {
+async function broadcastSidebar() {
   const sessions = agentManager.getSessions();
   const repos = agentManager.getLaunchableRepos();
+  const pendingCounts = await agentManager.getRepoPendingCounts();
   for (const client of clients.values()) {
-    const html = renderSidebar(sessions, repos, client.sessionId ?? undefined);
+    const html = renderSidebar(sessions, repos, client.sessionId ?? undefined, pendingCounts);
     client.send("sidebar", html);
   }
 }
@@ -107,11 +108,12 @@ app.use("/static/*", serveStatic({ root: "./" }));
 app.get("/", async (c) => {
   const sessions = agentManager.getSessions();
   const repos = agentManager.getLaunchableRepos();
+  const pendingCounts = await agentManager.getRepoPendingCounts();
   const activeSession = sessions[0] ?? null;
   const messages = activeSession
     ? agentManager.getRecentMessages(activeSession.id)
     : [];
-  return c.html(renderLayout(sessions, repos, activeSession, messages));
+  return c.html(renderLayout(sessions, repos, activeSession, messages, pendingCounts));
 });
 
 // SSE endpoint
@@ -139,7 +141,8 @@ app.get("/events", (c) => {
     // Push initial sidebar so client is never stale
     const sessions = agentManager.getSessions();
     const repos = agentManager.getLaunchableRepos();
-    const sidebarHtml = renderSidebar(sessions, repos, sessionId ?? undefined);
+    const pendingCounts = await agentManager.getRepoPendingCounts();
+    const sidebarHtml = renderSidebar(sessions, repos, sessionId ?? undefined, pendingCounts);
     client.send("sidebar", sidebarHtml);
 
     // Keep-alive ping every 15s

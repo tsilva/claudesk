@@ -157,10 +157,62 @@ ul, ol {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.needs-attention-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--status-amber);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.needs-attention-btn:hover:not(:disabled) {
+  background: var(--border-color);
+  border-color: var(--status-amber);
+}
+
+.needs-attention-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.needs-attention-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--status-amber);
+  color: #141413;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.needs-attention-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--status-amber);
 }
 
 .sidebar-filter-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 5px 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -445,6 +497,45 @@ ul, ol {
 .launch-item:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.pending-commits-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.star-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.repo-group-header:hover .star-btn,
+.launch-item:hover .star-btn,
+.star-btn.starred {
+  opacity: 1;
+}
+
+.star-btn.starred {
+  color: var(--status-amber);
 }
 
 .launch-item-action {

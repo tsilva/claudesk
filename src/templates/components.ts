@@ -128,6 +128,7 @@ export function renderSessionHeaderStatus(session: AgentSession): string {
           data-last-activity="${session.lastActivity.toISOString()}"
           data-status="${session.status}"></span>
     <span class="session-header-spacer"></span>
+    <button class="btn btn--ghost" onclick="focusEditor('${session.id}')" title="Open in editor">Editor</button>
     ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}`;
 }
 

@@ -85,6 +85,50 @@
     }
   });
 
+  // --- Needs Attention Cycle ---
+
+  window.cycleNeedsInput = function () {
+    var sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+
+    var cards = Array.from(sidebar.querySelectorAll(".session-card"));
+    var needsInput = cards.filter(function (card) {
+      return card.querySelector(".status-dot.needs_input");
+    });
+    if (needsInput.length === 0) return;
+
+    // Find the current active card's index in the needs-input list
+    var currentIndex = -1;
+    if (currentSessionId) {
+      needsInput.forEach(function (card, i) {
+        var hxGet = card.getAttribute("hx-get") || "";
+        if (hxGet.indexOf(currentSessionId) !== -1) {
+          currentIndex = i;
+        }
+      });
+    }
+
+    // Pick the next one (wrap around)
+    var nextCard = needsInput[(currentIndex + 1) % needsInput.length];
+    var hxGet = nextCard.getAttribute("hx-get") || "";
+    var match = hxGet.match(/\/sessions\/([^/]+)\/detail/);
+    if (match) {
+      switchSession(match[1]);
+      htmx.ajax("GET", hxGet, "#session-detail");
+    }
+  };
+
+  function updateNeedsAttentionBadge() {
+    var sidebar = document.getElementById("sidebar");
+    var badge = document.getElementById("needs-attention-badge");
+    var btn = document.getElementById("needs-attention-btn");
+    if (!badge || !btn) return;
+
+    var count = sidebar ? sidebar.querySelectorAll(".status-dot.needs_input").length : 0;
+    badge.textContent = count;
+    btn.disabled = count === 0;
+  }
+
   // --- Sidebar Filter ---
 
   function filterSidebar(query) {
@@ -174,6 +218,8 @@
           if (active) active.classList.add("active");
         }
         reapplyFilter();
+        applyStarredState();
+        updateNeedsAttentionBadge();
       });
     }
   });
@@ -250,11 +296,6 @@
     if (target) target.classList.add("active");
 
     reconnectSSE(sessionId);
-
-    // Focus the corresponding Cursor window (unless explicitly skipped)
-    if (!opts || !opts.skipEditorFocus) {
-      fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
-    }
   };
 
   function reconnectSSE(sessionId) {
@@ -446,6 +487,10 @@
     });
   };
 
+  window.focusEditor = function (sessionId) {
+    fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
+  };
+
   // --- Typing Indicator ---
 
   function showTypingIndicator() {
@@ -509,6 +554,78 @@
     });
   }, 1000);
 
+  // --- Starred Repos ---
+
+  function getStarredRepos() {
+    try {
+      var raw = localStorage.getItem("claudesk:starred-repos");
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveStarredRepos(set) {
+    localStorage.setItem("claudesk:starred-repos", JSON.stringify(Array.from(set)));
+  }
+
+  window.toggleStar = function (repoName) {
+    var starred = getStarredRepos();
+    if (starred.has(repoName)) {
+      starred.delete(repoName);
+    } else {
+      starred.add(repoName);
+    }
+    saveStarredRepos(starred);
+    applyStarredState();
+  };
+
+  function applyStarredState() {
+    var starred = getStarredRepos();
+
+    // Update star button icons and classes
+    var starBtns = document.querySelectorAll(".star-btn");
+    starBtns.forEach(function (btn) {
+      var group = btn.closest("[data-repo]");
+      if (!group) return;
+      var repo = group.getAttribute("data-repo");
+      var isStarred = starred.has(repo);
+      btn.innerHTML = isStarred ? "&#9733;" : "&#9734;";
+      btn.classList.toggle("starred", isStarred);
+    });
+
+    // Reorder repo-group elements within sidebar
+    var sidebarScroll = document.querySelector(".sidebar-scroll");
+    if (sidebarScroll) {
+      var container = sidebarScroll.querySelector("[sse-swap]") || sidebarScroll;
+      var groups = Array.from(container.querySelectorAll(":scope > .repo-group"));
+      if (groups.length > 1) {
+        groups.sort(function (a, b) {
+          var aStarred = starred.has(a.getAttribute("data-repo")) ? 0 : 1;
+          var bStarred = starred.has(b.getAttribute("data-repo")) ? 0 : 1;
+          if (aStarred !== bStarred) return aStarred - bStarred;
+          return (a.getAttribute("data-repo") || "").localeCompare(b.getAttribute("data-repo") || "");
+        });
+        groups.forEach(function (g) { container.appendChild(g); });
+      }
+    }
+
+    // Reorder launch-item elements within launch-section
+    var launchSection = document.querySelector(".launch-section");
+    if (launchSection) {
+      var items = Array.from(launchSection.querySelectorAll(".launch-item"));
+      if (items.length > 1) {
+        items.sort(function (a, b) {
+          var aStarred = starred.has(a.getAttribute("data-repo")) ? 0 : 1;
+          var bStarred = starred.has(b.getAttribute("data-repo")) ? 0 : 1;
+          if (aStarred !== bStarred) return aStarred - bStarred;
+          return (a.getAttribute("data-repo") || "").localeCompare(b.getAttribute("data-repo") || "");
+        });
+        items.forEach(function (item) { launchSection.appendChild(item); });
+      }
+    }
+  }
+
   // --- Init ---
 
   var app = document.querySelector(".app");
@@ -519,6 +636,9 @@
       currentSessionId = match[1];
     }
   }
+
+  updateNeedsAttentionBadge();
+  applyStarredState();
 
   // Hash-based session routing (e.g. #session=<id> from open fallback)
   var hash = window.location.hash;

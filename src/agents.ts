@@ -19,6 +19,20 @@ import type {
 const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const ARCHIVED_MARKER = ".archived";
 
+// --- Git Helpers ---
+
+async function getPendingCommitCount(repoPath: string): Promise<number> {
+  try {
+    const proc = Bun.spawn(["git", "rev-list", "@{upstream}..HEAD", "--count"], {
+      cwd: repoPath, stdout: "pipe", stderr: "pipe",
+    });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    const count = parseInt(output.trim(), 10);
+    return isNaN(count) ? 0 : count;
+  } catch { return 0; }
+}
+
 // --- Callbacks ---
 
 type MessageCallback = (msg: AgentMessage, session: AgentSession) => void;
@@ -107,6 +121,7 @@ export class AgentManager {
       cwd: session.cwd,
       model: session.model,
       abortController,
+      settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
         return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID);
@@ -502,9 +517,27 @@ export class AgentManager {
         repos.push({ name: entry.name, path: repoPath });
       }
 
+      await Promise.all(repos.map(async (r) => {
+        r.pendingCommits = await getPendingCommitCount(r.path);
+      }));
+
       this.launchableRepos = repos.sort((a, b) => a.name.localeCompare(b.name));
     } catch {
       this.launchableRepos = [];
     }
+  }
+
+  async getRepoPendingCounts(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    const uniqueCwds = new Set(
+      Array.from(this.sessions.values()).map((s) => s.cwd)
+    );
+    await Promise.all(
+      Array.from(uniqueCwds).map(async (cwd) => {
+        const count = await getPendingCommitCount(cwd);
+        if (count > 0) counts.set(cwd, count);
+      })
+    );
+    return counts;
   }
 }

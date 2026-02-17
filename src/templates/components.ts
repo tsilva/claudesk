@@ -190,7 +190,7 @@ export function renderSessionStats(session: AgentSession): string {
     <span class="stat">${session.turnCount} turn${session.turnCount !== 1 ? "s" : ""}</span>
     ${cost ? `<span class="stat-sep">·</span><span class="stat">${cost}</span>` : ""}
     ${session.model ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(session.model)}</span>` : ""}
-    ${mode ? `<span class="stat-sep">·</span><span class="stat mode-stat">${escapeHtml(mode)}</span>` : ""}
+    ${mode ? `<span class="stat-sep">·</span><span class="stat mode-stat mode-stat--${session.permissionMode}">${escapeHtml(mode)}</span>` : ""}
   </div>`;
 }
 
@@ -418,10 +418,10 @@ function renderTodoWriteUse(input: Record<string, any>): string {
   let items = "";
   for (const t of todos) {
     items += renderTaskItem(
-      t.subject ?? "Untitled",
+      t.content ?? t.subject ?? "Untitled",
       t.status ?? "pending",
       t.activeForm,
-      t.description,
+      undefined,
     );
   }
 

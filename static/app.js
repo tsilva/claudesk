@@ -535,6 +535,8 @@
 
     // Optimistic UI update
     btn.textContent = MODE_LABELS[nextMode] + ' \u21bb';
+    MODE_ORDER.forEach(function (m) { btn.classList.remove('mode--' + m); });
+    btn.classList.add('mode--' + nextMode);
 
     fetch('/api/agents/' + sessionId + '/mode', {
       method: 'POST',

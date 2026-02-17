@@ -20,6 +20,7 @@ export function renderLayout(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>claudesk</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/hljs-theme.css">
   <script src="/static/htmx.min.js"></script>

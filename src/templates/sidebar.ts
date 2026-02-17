@@ -20,18 +20,9 @@ export function renderSidebar(
   for (const [repoName, repoSessions] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const cwd = repoSessions[0]?.cwd ?? "";
     html += `<div class="repo-group">
-      <div class="launch-item-wrapper">
-        <div class="repo-group-header" onclick="toggleLaunchPrompt(this)" style="cursor:pointer">
-          <span>${escapeHtml(repoName)}</span>
-          <span class="launch-item-action">+</span>
-        </div>
-        <form class="launch-prompt-form hidden" onsubmit="launchAgent(event, '${escapeHtml(cwd)}')">
-          <input type="text" name="prompt" class="launch-prompt-input"
-            placeholder="Enter a prompt..."
-            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}"
-            required>
-          <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
-        </form>
+      <div class="repo-group-header">
+        <span>${escapeHtml(repoName)}</span>
+        <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
     for (const session of repoSessions) {
@@ -71,19 +62,10 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of repos) {
-      html += `<div class="launch-item-wrapper">
-        <button class="launch-item" onclick="toggleLaunchPrompt(this)">
-          <span>${escapeHtml(repo.name)}</span>
-          <span class="launch-item-action">+</span>
-        </button>
-        <form class="launch-prompt-form hidden" onsubmit="launchAgent(event, '${escapeHtml(repo.path)}')">
-          <input type="text" name="prompt" class="launch-prompt-input"
-            placeholder="Enter a prompt..."
-            onkeydown="if(event.key==='Escape'){this.closest('.launch-prompt-form').classList.add('hidden')}"
-            required>
-          <button type="submit" class="btn btn--primary launch-prompt-go">Go</button>
-        </form>
-      </div>`;
+      html += `<button class="launch-item" onclick="createSession('${escapeHtml(repo.path)}')">
+        <span>${escapeHtml(repo.name)}</span>
+        <span class="launch-item-action">+</span>
+      </button>`;
     }
 
     html += `</div>`;

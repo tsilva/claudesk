@@ -5,7 +5,7 @@
   // --- State ---
   let notificationsEnabled = false;
   let currentSessionId = null;
-  var savedLaunchFormState = null;
+
 
   // --- Notifications ---
 
@@ -108,7 +108,7 @@
       group.classList.toggle("hidden", allHidden);
     });
 
-    var launchItems = sidebar.querySelectorAll(".launch-item-wrapper");
+    var launchItems = sidebar.querySelectorAll(".launch-item");
     var allLaunchHidden = true;
     launchItems.forEach(function (item) {
       if (!q) {
@@ -145,61 +145,6 @@
     }
   }
 
-  // --- Launch Form State Preservation ---
-
-  function saveLaunchFormState() {
-    var form = document.querySelector(".launch-prompt-form:not(.hidden)");
-    if (!form) {
-      savedLaunchFormState = null;
-      return;
-    }
-    var promptInput = form.querySelector(".launch-prompt-input");
-    if (!promptInput) return;
-    // Identify the form by the cwd encoded in onsubmit
-    var onsubmit = form.getAttribute("onsubmit") || "";
-    savedLaunchFormState = {
-      formKey: onsubmit,
-      prompt: promptInput.value,
-      hadFocus: document.activeElement === promptInput,
-    };
-  }
-
-  function restoreLaunchFormState() {
-    if (!savedLaunchFormState) return;
-    var state = savedLaunchFormState;
-    var forms = document.querySelectorAll(".launch-prompt-form");
-    for (var i = 0; i < forms.length; i++) {
-      var onsubmit = forms[i].getAttribute("onsubmit") || "";
-      if (onsubmit === state.formKey) {
-        forms[i].classList.remove("hidden");
-        var promptInput = forms[i].querySelector(".launch-prompt-input");
-        if (promptInput) {
-          promptInput.value = state.prompt;
-          if (state.hadFocus) {
-            promptInput.focus();
-            promptInput.setSelectionRange(state.prompt.length, state.prompt.length);
-          }
-        }
-        return;
-      }
-    }
-  }
-
-  document.addEventListener("input", function (e) {
-    if (e.target && e.target.classList.contains("launch-prompt-input")) {
-      saveLaunchFormState();
-    }
-  });
-  document.addEventListener("focusin", function (e) {
-    if (e.target && e.target.classList.contains("launch-prompt-input")) {
-      saveLaunchFormState();
-    }
-  });
-
-  document.body.addEventListener("htmx:sseBeforeMessage", function () {
-    saveLaunchFormState();
-  });
-
   // --- SSE sidebar active-class logic ---
 
   document.body.addEventListener("htmx:sseMessage", function (e) {
@@ -220,7 +165,6 @@
           if (active) active.classList.add("active");
         }
         reapplyFilter();
-        restoreLaunchFormState();
       });
     }
   });
@@ -304,53 +248,23 @@
     updateConnectionDot(false);
   });
 
-  // --- Launch Prompt Toggle ---
-
-  window.toggleLaunchPrompt = function (btn) {
-    var wrapper = btn.closest(".launch-item-wrapper");
-    var form = wrapper.querySelector(".launch-prompt-form");
-
-    document.querySelectorAll(".launch-prompt-form").forEach(function (f) {
-      if (f !== form) f.classList.add("hidden");
-    });
-
-    form.classList.toggle("hidden");
-    if (!form.classList.contains("hidden")) {
-      form.querySelector(".launch-prompt-input").focus();
-      saveLaunchFormState();
-    } else {
-      savedLaunchFormState = null;
-    }
-  };
-
   // --- Agent Interaction ---
 
-  window.launchAgent = function (event, cwd) {
-    event.preventDefault();
-    var form = event.target;
-    var promptInput = form.querySelector('[name="prompt"]');
-    var prompt = promptInput ? promptInput.value.trim() : "";
-    if (!prompt) return;
-
+  window.createSession = function (cwd) {
     fetch("/api/agents/launch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd: cwd, prompt: prompt }),
+      body: JSON.stringify({ cwd: cwd }),
     })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.sessionId) {
-          form.reset();
-          form.classList.add("hidden");
-          savedLaunchFormState = null;
-          // Switch to the new session
           switchSession(data.sessionId);
-          // Fetch the detail view
           htmx.ajax("GET", "/sessions/" + data.sessionId + "/detail", "#session-detail");
         }
       })
       .catch(function (err) {
-        console.error("Launch failed:", err);
+        console.error("Create session failed:", err);
       });
   };
 

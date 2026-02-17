@@ -29,7 +29,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
     </div>
     <div id="permission-prompt-area" sse-swap="permission-request" hx-swap="innerHTML"></div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
-      ${messagesHtml}
+      ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div class="message-input-area">
       <form id="message-form" onsubmit="sendMessage(event, '${session.id}')">

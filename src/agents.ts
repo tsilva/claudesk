@@ -41,18 +41,17 @@ export class AgentManager {
 
   // --- Public API ---
 
-  async launch(cwd: string, prompt: string, model?: string): Promise<AgentSession> {
+  createSession(cwd: string, model?: string): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
-    const abortController = new AbortController();
 
     const session: AgentSession = {
       id,
       sdkSessionId: "",
       repoName,
       cwd,
-      status: "starting",
-      lastMessagePreview: prompt.slice(0, 80),
+      status: "idle",
+      lastMessagePreview: "",
       lastActivity: new Date(),
       createdAt: new Date(),
       gitBranch: "",
@@ -67,44 +66,20 @@ export class AgentManager {
     };
 
     this.sessions.set(id, session);
-    this.abortControllers.set(id, abortController);
-
-    // Add user message
-    const userMsg: AgentMessage = {
-      id: crypto.randomUUID(),
-      type: "user",
-      timestamp: new Date(),
-      userText: prompt,
-      text: prompt,
-    };
-    session.messages.push(userMsg);
-    this.onMessage(userMsg, session);
-
-    // Start the SDK query
-    const q = query({
-      prompt,
-      options: {
-        cwd,
-        model: session.model,
-        abortController,
-        canUseTool: (toolName, input, opts) =>
-          this.handleCanUseTool(id, toolName, input as Record<string, unknown>, opts.toolUseID),
-      },
-    });
-
-    this.queries.set(id, q);
     this.onSessionChange(this.getSessions());
 
-    // Consume stream in background
-    this.consumeStream(id, q);
+    return session;
+  }
 
+  async launch(cwd: string, prompt: string, model?: string): Promise<AgentSession> {
+    const session = this.createSession(cwd, model);
+    await this.sendMessage(session.id, prompt);
     return session;
   }
 
   async sendMessage(sessionId: string, text: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
-    if (!session.sdkSessionId) throw new Error("Session not initialized yet");
 
     const abortController = new AbortController();
     this.abortControllers.set(sessionId, abortController);
@@ -124,18 +99,19 @@ export class AgentManager {
     this.onMessage(userMsg, session);
     this.onSessionChange(this.getSessions());
 
-    // Resume the session with a new query
-    const q = query({
-      prompt: text,
-      options: {
-        cwd: session.cwd,
-        model: session.model,
-        resume: session.sdkSessionId,
-        abortController,
-        canUseTool: (toolName, input, opts) =>
-          this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID),
-      },
-    });
+    // First message: start new query; follow-up: resume existing session
+    const options: Record<string, unknown> = {
+      cwd: session.cwd,
+      model: session.model,
+      abortController,
+      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string }) =>
+        this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID),
+    };
+    if (session.sdkSessionId) {
+      options.resume = session.sdkSessionId;
+    }
+
+    const q = query({ prompt: text, options: options as any });
 
     this.queries.set(sessionId, q);
     this.consumeStream(sessionId, q);

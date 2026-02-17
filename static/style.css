@@ -459,43 +459,16 @@ ul, ol {
 }
 
 /* --------------------------------------------------------------------------
-   Launch Prompt Form
+   Empty Conversation Hint
    -------------------------------------------------------------------------- */
-.launch-prompt-form {
+.empty-conversation-hint {
   display: flex;
-  gap: 6px;
-  padding: 4px 14px 8px 18px;
-}
-
-.launch-prompt-form.hidden {
-  display: none;
-}
-
-.launch-prompt-input {
+  align-items: center;
+  justify-content: center;
   flex: 1;
-  min-width: 0;
-  padding: 4px 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
-  color: var(--text-primary);
-  outline: none;
-}
-
-.launch-prompt-input:focus {
-  border-color: var(--accent-orange);
-}
-
-.launch-prompt-input::placeholder {
   color: var(--text-dim);
-}
-
-.launch-prompt-go {
-  padding: 4px 10px;
-  font-size: 10px;
-  flex-shrink: 0;
+  font-size: 13px;
+  user-select: none;
 }
 
 /* --------------------------------------------------------------------------

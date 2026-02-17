@@ -1462,6 +1462,20 @@ button.launch-item {
 /* --------------------------------------------------------------------------
    Error message variant
    -------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------
+   Elapsed Timer
+   -------------------------------------------------------------------------- */
+.elapsed-timer {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.elapsed-warning {
+  color: var(--status-amber);
+}
+
 .message--error {
   border-left-color: #ef4444;
   background: rgba(239, 68, 68, 0.06);

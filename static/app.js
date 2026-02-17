@@ -422,6 +422,40 @@
     });
   };
 
+  // --- Elapsed Timer ---
+
+  function formatElapsed(ms) {
+    var seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return seconds + 's';
+    var minutes = Math.floor(seconds / 60);
+    var secs = seconds % 60;
+    return minutes + 'm ' + (secs < 10 ? '0' : '') + secs + 's';
+  }
+
+  setInterval(function () {
+    var elements = document.querySelectorAll('[data-last-activity]');
+    var now = Date.now();
+    elements.forEach(function (el) {
+      var status = el.getAttribute('data-status');
+      var ts = new Date(el.getAttribute('data-last-activity')).getTime();
+      var elapsed = now - ts;
+
+      if (status === 'streaming' || status === 'starting') {
+        var text = formatElapsed(elapsed);
+        if (el.classList.contains('elapsed-timer')) {
+          el.textContent = '\u00b7 ' + text;
+        } else {
+          el.textContent = text;
+        }
+        // Amber tint when elapsed > 60s while active
+        el.classList.toggle('elapsed-warning', elapsed > 60000);
+      } else if (el.classList.contains('elapsed-timer')) {
+        el.textContent = '';
+        el.classList.remove('elapsed-warning');
+      }
+    });
+  }, 1000);
+
   // --- Init ---
 
   var app = document.querySelector(".app");

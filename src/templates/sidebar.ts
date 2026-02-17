@@ -50,7 +50,9 @@ export function renderSidebar(
         <div class="session-card-row">
           ${statusDot(session.status)}
           <span class="session-card-slug">${escapeHtml(slug)}</span>
-          <span class="session-card-time">${relativeTime(session.lastActivity)}</span>
+          <span class="session-card-time"
+                data-last-activity="${session.lastActivity.toISOString()}"
+                data-status="${session.status}">${relativeTime(session.lastActivity)}</span>
           <button class="dismiss-btn" onclick="event.stopPropagation(); dismissSession('${session.id}')" title="Dismiss session">&times;</button>
         </div>
         <div class="session-card-preview">${escapeHtml(preview)}</div>

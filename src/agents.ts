@@ -31,6 +31,7 @@ export class AgentManager {
   private onMessage: MessageCallback;
   private onSessionChange: SessionChangeCallback;
   private launchableRepos: LaunchableRepo[] = [];
+  private lastBroadcast = new Map<string, number>();
 
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
@@ -59,7 +60,7 @@ export class AgentManager {
       inputTokens: 0,
       outputTokens: 0,
       turnCount: 0,
-      model: model || "claude-sonnet-4-5-20250929",
+      model: model || "claude-opus-4-6",
       pendingQuestion: null,
       pendingPermission: null,
       messages: [],
@@ -376,9 +377,16 @@ export class AgentManager {
         break;
       }
 
-      default:
-        // Ignore other message types (partial, status, hook, etc.)
+      default: {
+        session.lastActivity = new Date();
+        const now = Date.now();
+        const lastBroadcast = this.lastBroadcast.get(sessionId) ?? 0;
+        if (now - lastBroadcast > 5000) {
+          this.lastBroadcast.set(sessionId, now);
+          this.onSessionChange(this.getSessions());
+        }
         break;
+      }
     }
   }
 

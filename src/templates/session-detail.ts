@@ -18,6 +18,9 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
         <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
         ${statusBadge(session.status)}
+        <span class="elapsed-timer"
+              data-last-activity="${session.lastActivity.toISOString()}"
+              data-status="${session.status}"></span>
       </div>
       <div class="session-header-spacer"></div>
       <div>

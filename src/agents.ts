@@ -243,12 +243,17 @@ export class AgentManager {
     this.onMessage(userMsg, session);
     this.onSessionChange(this.getSessions());
 
+    // Strip CLAUDECODE so the subprocess can run even inside a Claude Code session
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+
     // First message: start new query; follow-up: resume existing session
     const options: Record<string, unknown> = {
       cwd: session.cwd,
       model: session.model,
       abortController,
       permissionMode: session.permissionMode,
+      env,
       settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);

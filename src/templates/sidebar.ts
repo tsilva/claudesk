@@ -76,7 +76,12 @@ export function renderSidebar(
 
   if (launchRepos.length > 0) {
     html += `<div class="launch-section">
-      <div class="launch-section-header">Launch</div>`;
+      <div class="launch-section-header">
+        <span>Launch</span>
+        <button class="refresh-btn" hx-post="/api/repos/refresh" hx-swap="none" title="Refresh repo status">
+          &#x21bb;
+        </button>
+      </div>`;
 
     for (const repo of launchRepos) {
       html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="showModelPicker(event, '${escapeJs(repo.path)}')">

@@ -469,6 +469,35 @@ ul, ol {
   color: var(--text-dim);
 }
 
+.refresh-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-left: auto;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  line-height: 1;
+}
+
+.refresh-btn:hover {
+  opacity: 1;
+  color: var(--accent-orange);
+}
+
+.refresh-btn.htmx-request {
+  animation: spin 1s linear infinite;
+  opacity: 1;
+  color: var(--accent-orange);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .launch-item {
   display: flex;
   align-items: center;

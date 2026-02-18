@@ -463,6 +463,13 @@ app.post("/api/agents/:id/stop", async (c) => {
   return c.json({ ok: true });
 });
 
+// Refresh repo git status
+app.post("/api/repos/refresh", async (c) => {
+  await agentManager.scanLaunchableRepos();
+  broadcastSidebar().catch((err) => console.warn("[broadcastSidebar] error:", err));
+  return c.json({ ok: true });
+});
+
 // --- Start ---
 
 await agentManager.init();

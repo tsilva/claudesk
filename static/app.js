@@ -298,7 +298,7 @@
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");
       if (container) {
-        container.scrollTop = 0;
+        container.scrollTop = container.scrollHeight;
       }
       // Focus message input when session loads
       var input = document.querySelector(".message-input");
@@ -847,11 +847,11 @@
         removeTypingIndicator();
         removeFinishingIndicator();
       }
-      // Scroll to bottom after new content appended
+      // Scroll to bottom after new content appended (column-reverse layout: newest at bottom)
       var container = document.getElementById("conversation-stream");
       if (container) {
         requestAnimationFrame(function () {
-          container.scrollTop = 0;
+          container.scrollTop = container.scrollHeight;
         });
       }
     }
@@ -877,9 +877,9 @@
     }
     removeTypingIndicator();
     removeFinishingIndicator();
-    // Scroll to top after footer injected
+    // Scroll to bottom after footer injected (column-reverse layout: newest at bottom)
     requestAnimationFrame(function () {
-      container.scrollTop = 0;
+      container.scrollTop = container.scrollHeight;
     });
   });
 

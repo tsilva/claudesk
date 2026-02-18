@@ -11,13 +11,29 @@ export type AgentStatus =
 // --- Content Blocks (reused from old sessions.ts) ---
 
 export interface ContentBlock {
-  type: "text" | "thinking" | "tool_use" | "tool_result";
+  type: "text" | "thinking" | "tool_use" | "tool_result" | "image";
   text?: string;
   toolName?: string;
   toolInput?: unknown;
   toolUseId?: string;
   content?: string;
   isError?: boolean;
+  // For image content blocks
+  source?: {
+    type: "base64";
+    media_type: string;
+    data: string;
+  };
+}
+
+// --- Attachments ---
+
+export interface Attachment {
+  id: string;
+  name: string;
+  type: string; // MIME type
+  size: number; // bytes
+  data: string; // base64 encoded
 }
 
 // --- Agent Messages ---
@@ -56,6 +72,7 @@ export interface AgentMessage {
     resolved?: "accepted" | "revised" | "timed_out";
     reviseFeedback?: string;
   };
+  attachments?: Attachment[];
 }
 
 // --- Permission & Question handling ---
@@ -188,6 +205,7 @@ export interface PersistedMessage {
     resolved?: "accepted" | "revised" | "timed_out";
     reviseFeedback?: string;
   };
+  attachments?: Attachment[];
 }
 
 export interface PersistedSession {

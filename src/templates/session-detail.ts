@@ -38,12 +38,19 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div class="message-input-area">
-      <form id="message-form" onsubmit="sendMessage(event, '${session.id}')">
+      <form id="message-form" onsubmit="sendMessage(event, '${session.id}')" enctype="multipart/form-data">
+        <div id="attachment-preview" class="attachment-preview"></div>
         <textarea name="text" class="message-input" rows="1"
           placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
           onkeydown="handleMessageKeydown(event, '${session.id}')"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}></textarea>
+        <div class="message-input-actions">
+          <button type="button" class="btn btn--icon" onclick="document.getElementById('file-input').click()" title="Attach file">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+          </button>
+          <input type="file" id="file-input" multiple accept="image/*,.txt,.md,.json,.js,.ts,.py,.html,.css,.yml,.yaml,.xml,.csv" style="display:none" onchange="handleFileSelect(event)">
+        </div>
       </form>
     </div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">

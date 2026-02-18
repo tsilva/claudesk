@@ -201,7 +201,7 @@ export class AgentManager {
     return session;
   }
 
-  async sendMessage(sessionId: string, text: string): Promise<void> {
+  async sendMessage(sessionId: string, text: string, attachments?: { name: string; type: string; size: number; data: string }[]): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
 
@@ -227,6 +227,34 @@ export class AgentManager {
     const abortController = new AbortController();
     this.abortControllers.set(sessionId, abortController);
 
+    // Convert attachments to SDK format
+    const userAttachments: import("./types.ts").Attachment[] = [];
+    const contentBlocks: import("./types.ts").ContentBlock[] = [];
+    
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        userAttachments.push({
+          id: crypto.randomUUID(),
+          name: att.name,
+          type: att.type,
+          size: att.size,
+          data: att.data,
+        });
+        
+        // For images, create image content blocks for the SDK
+        if (att.type.startsWith("image/")) {
+          contentBlocks.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: att.type,
+              data: att.data,
+            },
+          });
+        }
+      }
+    }
+
     // Add user message
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
@@ -234,6 +262,7 @@ export class AgentManager {
       timestamp: new Date(),
       userText: text,
       text,
+      attachments: userAttachments,
     };
     session.messages.push(userMsg);
     session.lastMessagePreview = text.slice(0, 80);
@@ -267,7 +296,46 @@ export class AgentManager {
       options.resume = session.sdkSessionId;
     }
 
-    const q = query({ prompt: text, options: options as any });
+    // Build prompt - use streaming input for images, string for text-only
+    let prompt;
+    if (attachments && attachments.some(a => a.type.startsWith("image/"))) {
+      // Use streaming input mode for multimodal messages
+      const imageAttachments = attachments.filter(a => a.type.startsWith("image/"));
+      const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+      
+      if (text?.trim()) {
+        content.push({ type: "text", text });
+      }
+      
+      for (const img of imageAttachments) {
+        content.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: img.type,
+            data: img.data,
+          },
+        });
+      }
+      
+      // Create async generator for streaming input
+      async function* messageGenerator() {
+        yield {
+          type: "user" as const,
+          message: {
+            role: "user" as const,
+            content,
+          },
+        };
+      }
+      
+      prompt = messageGenerator();
+    } else {
+      // Simple text-only message
+      prompt = text || "";
+    }
+
+    const q = query({ prompt: prompt as any, options: options as any });
 
     this.queries.set(sessionId, q);
     this.consumeStream(sessionId, q);

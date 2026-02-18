@@ -377,17 +377,48 @@ app.post("/api/agents/launch", async (c) => {
   }
 });
 
-// Send a follow-up message
+// Send a follow-up message (supports multipart/form-data for file uploads)
 app.post("/api/agents/:id/message", async (c) => {
   try {
     const id = c.req.param("id");
-    const body = await c.req.json<{ text: string }>();
-    if (!body.text) return c.json({ error: "text required" }, 400);
+    const contentType = c.req.header("content-type") || "";
+    
+    let text = "";
+    const attachments: { name: string; type: string; size: number; data: string }[] = [];
+    
+    if (contentType.includes("multipart/form-data")) {
+      // Handle file uploads
+      const formData = await c.req.formData();
+      text = formData.get("text") as string || "";
+      
+      // Process uploaded files
+      const files = formData.getAll("files");
+      for (const file of files) {
+        if (file instanceof File) {
+          const arrayBuffer = await file.arrayBuffer();
+          const data = Buffer.from(arrayBuffer).toString("base64");
+          attachments.push({
+            name: file.name,
+            type: file.type || "application/octet-stream",
+            size: file.size,
+            data,
+          });
+        }
+      }
+    } else {
+      // JSON fallback for backward compatibility
+      const body = await c.req.json<{ text: string }>();
+      text = body.text || "";
+    }
+    
+    if (!text.trim() && attachments.length === 0) {
+      return c.json({ error: "text or files required" }, 400);
+    }
 
     const session = agentManager.getSession(id);
     if (!session) return c.json({ error: "session not found" }, 404);
 
-    await agentManager.sendMessage(id, body.text);
+    await agentManager.sendMessage(id, text, attachments);
     return c.json({ ok: true });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "failed";

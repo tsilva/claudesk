@@ -31,6 +31,7 @@ function serializeMessage(msg: AgentMessage): PersistedMessage {
     permissionData: msg.permissionData,
     questionData: msg.questionData,
     planApprovalData: msg.planApprovalData,
+    attachments: msg.attachments,
   };
 }
 
@@ -52,6 +53,7 @@ function deserializeMessage(data: PersistedMessage): AgentMessage {
     permissionData: data.permissionData,
     questionData: data.questionData,
     planApprovalData: data.planApprovalData,
+    attachments: data.attachments,
   };
 }
 

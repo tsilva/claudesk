@@ -485,10 +485,34 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
 
 function renderUserMessage(msg: AgentMessage): string {
   const text = msg.userText ?? msg.text ?? "";
-  if (!text.trim()) return "";
+  const hasAttachments = msg.attachments && msg.attachments.length > 0;
+  if (!text.trim() && !hasAttachments) return "";
+
+  let attachmentsHtml = "";
+  if (hasAttachments) {
+    attachmentsHtml = `<div class="message-attachments">`;
+    for (const att of msg.attachments!) {
+      if (att.type.startsWith("image/")) {
+        attachmentsHtml += `<div class="attachment attachment--image" onclick="openImageLightbox('${escapeHtml(att.data)}')">
+          <img src="data:${escapeHtml(att.type)};base64,${escapeHtml(att.data)}" alt="${escapeHtml(att.name)}">
+        </div>`;
+      } else {
+        const sizeKb = Math.round(att.size / 1024);
+        attachmentsHtml += `<div class="attachment attachment--file">
+          <span class="attachment-file-icon">📄</span>
+          <span class="attachment-file-name">${escapeHtml(att.name)}</span>
+          <span class="attachment-file-size">${sizeKb} KB</span>
+        </div>`;
+      }
+    }
+    attachmentsHtml += `</div>`;
+  }
 
   return `<div class="message message--user" data-id="${msg.id}" title="User">
-    <div class="message-content">${escapeHtml(text)}</div>
+    <div class="message-content">
+      ${text.trim() ? escapeHtml(text) : ""}
+      ${attachmentsHtml}
+    </div>
   </div>`;
 }
 
@@ -563,6 +587,14 @@ function renderContentBlock(block: ContentBlock): string {
 
       return `<div class="tool-result${isError ? " tool-result--error" : ""}">
         <pre class="tool-result-content">${escapeHtml(displayContent)}</pre>
+      </div>`;
+    }
+
+    case "image": {
+      if (!block.source?.data) return "";
+      const mediaType = block.source.media_type || "image/png";
+      return `<div class="content-block content-block--image">
+        <img src="data:${escapeHtml(mediaType)};base64,${escapeHtml(block.source.data)}" alt="Generated image" onclick="openImageLightbox('${escapeHtml(block.source.data)}', '${escapeHtml(mediaType)}')">
       </div>`;
     }
 

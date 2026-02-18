@@ -547,8 +547,210 @@ ul, ol {
 
 .git-badge--unpushed {
   color: var(--status-green);
-  background: rgba(74, 222, 128, 0.08);
+  background: rgba(74, 222, 128, 0.12);
   border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+/* ==========================================================================
+   File Attachments
+   ========================================================================== */
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.attachment:hover {
+  background: var(--bg-secondary);
+}
+
+.attachment--image {
+  padding: 2px;
+  max-width: 200px;
+}
+
+.attachment--image img {
+  max-width: 100%;
+  max-height: 150px;
+  border-radius: 2px;
+  display: block;
+}
+
+.attachment--file {
+  color: var(--text-secondary);
+}
+
+.attachment-file-icon {
+  font-size: 12px;
+}
+
+.attachment-file-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-file-size {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.attachment-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0;
+  margin-bottom: 4px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.attachment-icon {
+  font-size: 12px;
+}
+
+.attachment-name {
+  color: var(--text-primary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.attachment-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  margin-left: 4px;
+}
+
+.attachment-remove:hover {
+  color: var(--status-orange);
+}
+
+.message-input-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn--icon:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--text-dim);
+}
+
+.btn--icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.content-block--image {
+  margin: 8px 0;
+}
+
+.content-block--image img {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.content-block--image img:hover {
+  opacity: 0.9;
+}
+
+/* Image Lightbox */
+.image-lightbox-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+
+.image-lightbox-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.image-lightbox-content img {
+  max-width: 100%;
+  max-height: 90vh;
+  border-radius: 4px;
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 28px;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .star-btn {

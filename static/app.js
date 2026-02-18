@@ -472,12 +472,67 @@
     }
   };
 
+  // --- File Upload ---
+  var pendingFiles = [];
+
+  window.handleFileSelect = function (event) {
+    var files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    for (var i = 0; i < files.length; i++) {
+      pendingFiles.push(files[i]);
+    }
+    updateAttachmentPreview();
+    event.target.value = ''; // Reset input for re-selection
+  };
+
+  window.removeAttachment = function (index) {
+    pendingFiles.splice(index, 1);
+    updateAttachmentPreview();
+  };
+
+  function updateAttachmentPreview() {
+    var container = document.getElementById("attachment-preview");
+    if (!container) return;
+    
+    if (pendingFiles.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+    
+    var html = "";
+    for (var i = 0; i < pendingFiles.length; i++) {
+      var file = pendingFiles[i];
+      var sizeKb = Math.round(file.size / 1024);
+      var isImage = file.type.startsWith("image/");
+      
+      html += '<div class="attachment-chip">';
+      if (isImage) {
+        html += '<span class="attachment-icon">🖼️</span>';
+      } else {
+        html += '<span class="attachment-icon">📄</span>';
+      }
+      html += '<span class="attachment-name">' + escapeHtml(file.name) + '</span>';
+      html += '<span class="attachment-size">' + sizeKb + ' KB</span>';
+      html += '<button type="button" class="attachment-remove" onclick="removeAttachment(' + i + ')">×</button>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   window.sendMessage = function (event, sessionId) {
     event.preventDefault();
     var form = event.target;
     var input = form.querySelector('[name="text"]');
     var text = input ? input.value.trim() : "";
-    if (!text) return;
+    
+    if (!text && pendingFiles.length === 0) return;
 
     // Disable input while sending
     input.disabled = true;
@@ -488,10 +543,28 @@
     var container = document.getElementById("conversation-stream");
     if (container) container.scrollTop = container.scrollHeight;
 
+    var body;
+    var headers = {};
+    
+    if (pendingFiles.length > 0) {
+      // Use FormData for file uploads
+      body = new FormData();
+      body.append("text", text);
+      for (var i = 0; i < pendingFiles.length; i++) {
+        body.append("files", pendingFiles[i]);
+      }
+      pendingFiles = [];
+      updateAttachmentPreview();
+    } else {
+      // JSON for text-only messages
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify({ text: text });
+    }
+
     fetch("/api/agents/" + sessionId + "/message", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text }),
+      headers: headers,
+      body: body,
     })
       .then(function (res) {
         if (!res.ok) throw new Error(res.statusText || "Send failed");
@@ -505,6 +578,20 @@
         input.disabled = false;
         input.focus();
       });
+  };
+
+  window.openImageLightbox = function (base64Data, mediaType) {
+    mediaType = mediaType || "image/png";
+    var overlay = document.createElement("div");
+    overlay.className = "image-lightbox-overlay";
+    overlay.innerHTML = '<div class="image-lightbox-content"><img src="data:' + mediaType + ";base64," + base64Data + '"><button class="image-lightbox-close">×</button></div>';
+    document.body.appendChild(overlay);
+    
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay || e.target.className === "image-lightbox-close") {
+        document.body.removeChild(overlay);
+      }
+    });
   };
 
   window.approvePermission = function (sessionId, toolUseId) {

@@ -504,8 +504,19 @@ export class AgentManager {
         if (msg.subtype === "init") {
           session.sdkSessionId = msg.session_id;
           session.status = "streaming";
-          console.log(`[DEBUG init] session=${sessionId} requested_model=${session.model} init_model=${(msg as any).model}`);
-          session.model = (msg as any).model ?? session.model;
+          const initModel = (msg as any).model;
+          console.log(`[DEBUG init] session=${sessionId} requested_model=${session.model} init_model=${initModel}`);
+          // If SDK resolved a different model (e.g. from user settings), override it
+          if (initModel && initModel !== session.model) {
+            const q = this.queries.get(sessionId);
+            if (q) {
+              q.setModel(session.model).catch((err: unknown) =>
+                console.warn(`[model-override] setModel failed:`, err)
+              );
+            }
+          } else {
+            session.model = initModel ?? session.model;
+          }
           this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());
         }

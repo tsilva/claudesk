@@ -205,6 +205,25 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
 
+    if (session.status === "streaming" || session.status === "starting") {
+      throw new Error(`Session is busy (status: ${session.status})`);
+    }
+    if (session.status === "stopped") {
+      throw new Error("Session has been stopped");
+    }
+
+    // Abort any lingering query before starting a new one
+    const existingController = this.abortControllers.get(sessionId);
+    if (existingController) {
+      existingController.abort();
+      this.abortControllers.delete(sessionId);
+    }
+    const existingQuery = this.queries.get(sessionId);
+    if (existingQuery) {
+      existingQuery.close();
+      this.queries.delete(sessionId);
+    }
+
     const abortController = new AbortController();
     this.abortControllers.set(sessionId, abortController);
 
@@ -224,12 +243,17 @@ export class AgentManager {
     this.onMessage(userMsg, session);
     this.onSessionChange(this.getSessions());
 
+    // Strip CLAUDECODE so the subprocess can run even inside a Claude Code session
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+
     // First message: start new query; follow-up: resume existing session
     const options: Record<string, unknown> = {
       cwd: session.cwd,
       model: session.model,
       abortController,
       permissionMode: session.permissionMode,
+      env,
       settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
         console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
@@ -305,7 +329,10 @@ export class AgentManager {
     }
 
     session.pendingQuestion = null;
-    session.status = "streaming";
+    // Only transition to streaming if no more pending permissions/plan approvals
+    if (session.pendingPermissions.size === 0 && !session.pendingPlanApproval) {
+      session.status = "streaming";
+    }
     this.onSessionChange(this.getSessions());
 
     pending.resolve({
@@ -332,7 +359,10 @@ export class AgentManager {
     }
 
     session.pendingPlanApproval = null;
-    session.status = "streaming";
+    // Only transition to streaming if no more pending permissions/questions
+    if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
+      session.status = "streaming";
+    }
 
     if (accept) {
       session.permissionMode = "default";
@@ -366,6 +396,9 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
+    // Set stopped status BEFORE aborting so consumeStream's catch block sees it
+    session.status = "stopped";
+
     const controller = this.abortControllers.get(sessionId);
     if (controller) {
       controller.abort();
@@ -378,15 +411,30 @@ export class AgentManager {
       this.queries.delete(sessionId);
     }
 
-    session.status = "stopped";
+    // Resolve all pending promises so the SDK is not left blocked
     for (const perm of session.pendingPermissions.values()) {
       clearTimeout(perm.timeoutId);
+      perm.resolve({ behavior: "deny", message: "Agent stopped" });
     }
     session.pendingPermissions.clear();
-    if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
-    session.pendingQuestion = null;
-    if (session.pendingPlanApproval) clearTimeout(session.pendingPlanApproval.timeoutId);
-    session.pendingPlanApproval = null;
+    if (session.pendingQuestion) {
+      clearTimeout(session.pendingQuestion.timeoutId);
+      session.pendingQuestion.resolve({ behavior: "deny", message: "Agent stopped" });
+      session.pendingQuestion = null;
+    }
+    if (session.pendingPlanApproval) {
+      clearTimeout(session.pendingPlanApproval.timeoutId);
+      session.pendingPlanApproval.resolve({ behavior: "deny", message: "Agent stopped" });
+      session.pendingPlanApproval = null;
+    }
+
+    // Clear persist timers
+    const timer = this.persistTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.persistTimers.delete(sessionId);
+    }
+
     this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
   }
@@ -407,22 +455,38 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
+    // Resolve all pending promises so the SDK is not left blocked
     for (const perm of session.pendingPermissions.values()) {
       clearTimeout(perm.timeoutId);
+      perm.resolve({ behavior: "deny", message: "Session dismissed" });
     }
     session.pendingPermissions.clear();
-    if (session.pendingQuestion) clearTimeout(session.pendingQuestion.timeoutId);
-    if (session.pendingPlanApproval) clearTimeout(session.pendingPlanApproval.timeoutId);
+    if (session.pendingQuestion) {
+      clearTimeout(session.pendingQuestion.timeoutId);
+      session.pendingQuestion.resolve({ behavior: "deny", message: "Session dismissed" });
+    }
+    if (session.pendingPlanApproval) {
+      clearTimeout(session.pendingPlanApproval.timeoutId);
+      session.pendingPlanApproval.resolve({ behavior: "deny", message: "Session dismissed" });
+    }
 
     const controller = this.abortControllers.get(sessionId);
     if (controller) controller.abort();
     const q = this.queries.get(sessionId);
     if (q) q.close();
 
+    // Clear persist timer
+    const timer = this.persistTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.persistTimers.delete(sessionId);
+    }
+
     deleteSessionFile(sessionId);
     this.sessions.delete(sessionId);
     this.queries.delete(sessionId);
     this.abortControllers.delete(sessionId);
+    this.lastBroadcast.delete(sessionId);
 
     this.onSessionChange(this.getSessions());
     return true;
@@ -762,7 +826,9 @@ export class AgentManager {
       const timeoutId = setTimeout(() => {
         if (settled) return;
         session.pendingQuestion = null;
-        session.status = "streaming";
+        if (session.pendingPermissions.size === 0 && !session.pendingPlanApproval) {
+          session.status = "streaming";
+        }
 
         // Update the inline question message to show timed out state
         const qMsg = session.messages.find(m => m.id === `q-${toolUseId}`);
@@ -826,7 +892,9 @@ export class AgentManager {
       const timeoutId = setTimeout(() => {
         if (settled) return;
         session.pendingPlanApproval = null;
-        session.status = "streaming";
+        if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
+          session.status = "streaming";
+        }
 
         const planMsg = session.messages.find(m => m.id === `plan-${toolUseId}`);
         if (planMsg?.planApprovalData) {
@@ -837,6 +905,12 @@ export class AgentManager {
 
         safeResolve({ behavior: "deny", message: "Plan approval timed out after 5 minutes" });
       }, PERMISSION_TIMEOUT_MS);
+
+      // Resolve any existing plan approval before setting a new one
+      if (session.pendingPlanApproval) {
+        clearTimeout(session.pendingPlanApproval.timeoutId);
+        session.pendingPlanApproval.resolve({ behavior: "deny", message: "Superseded by new plan approval" });
+      }
 
       session.pendingPlanApproval = {
         toolUseId,

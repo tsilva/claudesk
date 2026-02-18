@@ -317,6 +317,10 @@
         var detail = document.getElementById("session-detail");
         if (detail) detail.innerHTML = "";
       }
+      // Clean up notification dedup state for this session
+      seenNotifications.forEach(function (k) {
+        if (k.endsWith(":" + sessionId)) seenNotifications.delete(k);
+      });
     });
   };
 
@@ -471,7 +475,8 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: text }),
     })
-      .then(function () {
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.statusText || "Send failed");
         input.value = "";
       })
       .catch(function (err) {
@@ -498,6 +503,7 @@
 
   window.denyPermission = function (sessionId, toolUseId) {
     var message = prompt("Denial reason (optional):");
+    if (message === null) return; // User cancelled the prompt dialog
     seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
@@ -515,6 +521,7 @@
     var sessionId = btn.getAttribute("data-session");
     var question = btn.getAttribute("data-question");
     var label = btn.getAttribute("data-label");
+    var msgId = btn.getAttribute("data-msg-id");
 
     // Deselect siblings in same question block
     var block = btn.closest(".question-block");
@@ -530,7 +537,7 @@
     var prompt = btn.closest(".question-prompt");
     var blocks = prompt ? prompt.querySelectorAll(".question-block") : [];
     if (blocks.length === 1) {
-      submitQuestionAnswers(sessionId);
+      submitQuestionAnswers(sessionId, msgId);
     }
   };
 
@@ -554,6 +561,7 @@
   window.selectQuestionOther = function (inputEl) {
     var sessionId = inputEl.getAttribute("data-session");
     var question = inputEl.getAttribute("data-question");
+    var msgId = inputEl.getAttribute("data-msg-id");
     var value = inputEl.value.trim();
     if (!value) return;
 
@@ -571,20 +579,23 @@
     var prompt = inputEl.closest(".question-prompt");
     var blocks = prompt ? prompt.querySelectorAll(".question-block") : [];
     if (blocks.length === 1) {
-      submitQuestionAnswers(sessionId);
+      submitQuestionAnswers(sessionId, msgId);
     }
   };
 
-  window.submitQuestionAnswers = function (sessionId) {
+  window.submitQuestionAnswers = function (sessionId, msgId) {
     var answers = Object.assign({}, pendingAnswers);
     pendingAnswers = {};
     seenNotifications.delete("question:" + sessionId);
 
-    // Optimistically collapse the question UI immediately
+    // Optimistically collapse the specific question message being answered
     var answerValues = Object.values(answers).filter(Boolean).join(', ');
     var badgeText = answerValues ? 'Answered: ' + answerValues : 'Answered';
-    var questionMsgs = document.querySelectorAll('#conversation-stream .message--question');
+    var questionMsgs = msgId
+      ? (document.getElementById(msgId) ? [document.getElementById(msgId)] : [])
+      : document.querySelectorAll('#conversation-stream .message--question');
     questionMsgs.forEach(function(el) {
+      if (!el) return;
       var questionTextEl = el.querySelector('.question-text');
       var firstQ = questionTextEl ? questionTextEl.textContent.trim() : 'Question';
       el.className = 'message message--system';

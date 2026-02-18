@@ -1,5 +1,5 @@
 import type { AgentSession, LaunchableRepo, RepoGitStatus } from "../types.ts";
-import { escapeHtml, statusDot, relativeTime, formatTokens } from "./components.ts";
+import { escapeHtml, escapeJs, statusDot, relativeTime, formatTokens } from "./components.ts";
 
 function renderGitBadges(status: RepoGitStatus | undefined): string {
   if (!status) return "";
@@ -35,10 +35,10 @@ export function renderSidebar(
     const groupStatus = pendingCounts?.get(cwd);
     html += `<div class="repo-group" data-repo="${escapeHtml(repoName)}">
       <div class="repo-group-header">
-        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeJs(repoName)}')">&#9734;</span>
         <span>${escapeHtml(repoName)}</span>
         ${renderGitBadges(groupStatus)}
-        <span class="launch-item-action" onclick="event.stopPropagation(); showModelPicker(event, '${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
+        <span class="launch-item-action" onclick="event.stopPropagation(); showModelPicker(event, '${escapeJs(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
     for (const session of repoSessions) {
@@ -79,8 +79,8 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of launchRepos) {
-      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="showModelPicker(event, '${escapeHtml(repo.path)}')">
-        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
+      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="showModelPicker(event, '${escapeJs(repo.path)}')">
+        <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeJs(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>
         ${renderGitBadges(repo.gitStatus)}
         <span class="launch-item-action">+</span>

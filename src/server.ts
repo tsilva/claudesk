@@ -91,6 +91,7 @@ const agentManager = new AgentManager(
   // onSessionChange callback
   (sessions: AgentSession[]) => {
     // Detect streaming/starting → idle transitions for completion notifications
+    const activeSessionIds = new Set(sessions.map(s => s.id));
     for (const session of sessions) {
       const prev = prevStatuses.get(session.id);
       if ((prev === "streaming" || prev === "starting") && session.status === "idle") {
@@ -102,8 +103,12 @@ const agentManager = new AgentManager(
       }
       prevStatuses.set(session.id, session.status);
     }
+    // Clean up prevStatuses for dismissed sessions
+    for (const id of prevStatuses.keys()) {
+      if (!activeSessionIds.has(id)) prevStatuses.delete(id);
+    }
 
-    broadcastSidebar();
+    broadcastSidebar().catch((err) => console.warn("[broadcastSidebar] error:", err));
     // Update session header status for viewers of each session
     for (const client of clients.values()) {
       if (!client.sessionId) continue;
@@ -141,16 +146,26 @@ app.get("/events", (c) => {
   return streamSSE(c, async (stream) => {
     const clientId = `client-${++clientIdCounter}`;
 
+    let keepAlive: ReturnType<typeof setInterval> | null = null;
+
+    function removeClient() {
+      clients.delete(clientId);
+      if (keepAlive !== null) {
+        clearInterval(keepAlive);
+        keepAlive = null;
+      }
+    }
+
     const client: SSEClient = {
       id: clientId,
       sessionId,
       send: (event, data) => {
         stream.writeSSE({ event, data }).catch(() => {
-          clients.delete(clientId);
+          removeClient();
         });
       },
       close: () => {
-        clients.delete(clientId);
+        removeClient();
       },
     };
 
@@ -173,16 +188,14 @@ app.get("/events", (c) => {
     }
 
     // Keep-alive ping every 15s
-    const keepAlive = setInterval(() => {
+    keepAlive = setInterval(() => {
       stream.writeSSE({ event: "ping", data: "" }).catch(() => {
-        clearInterval(keepAlive);
-        clients.delete(clientId);
+        removeClient();
       });
     }, 15000);
 
     stream.onAbort(() => {
-      clearInterval(keepAlive);
-      clients.delete(clientId);
+      removeClient();
     });
 
     await new Promise(() => {});
@@ -282,12 +295,31 @@ app.delete("/sessions/:id", async (c) => {
 
 // --- Agent API ---
 
+const VALID_PERMISSION_MODES = new Set([
+  'default', 'acceptEdits', 'bypassPermissions', 'plan', 'delegate', 'dontAsk',
+]);
+const VALID_MODEL_IDS = new Set([
+  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+  'claude-opus-4-5', 'claude-sonnet-4-5',
+]);
+const VALID_PRESETS = new Set(['opus', 'sonnet', 'opus-plan']);
+
 // Create a new session (no prompt required)
 app.post("/api/agents/launch", async (c) => {
   try {
     const body = await c.req.json<{ cwd: string; model?: string; permissionMode?: string; preset?: string }>();
     const { cwd, model, permissionMode, preset } = body;
     if (!cwd) return c.json({ error: "cwd required" }, 400);
+
+    if (permissionMode && !VALID_PERMISSION_MODES.has(permissionMode)) {
+      return c.json({ error: "invalid permissionMode" }, 400);
+    }
+    if (model && !VALID_MODEL_IDS.has(model)) {
+      return c.json({ error: "invalid model" }, 400);
+    }
+    if (preset && !VALID_PRESETS.has(preset)) {
+      return c.json({ error: "invalid preset" }, 400);
+    }
 
     const session = agentManager.createSession(cwd, model, permissionMode as any, preset as any);
     return c.json({ ok: true, sessionId: session.id });
@@ -303,10 +335,17 @@ app.post("/api/agents/:id/message", async (c) => {
     const body = await c.req.json<{ text: string }>();
     if (!body.text) return c.json({ error: "text required" }, 400);
 
+    const session = agentManager.getSession(id);
+    if (!session) return c.json({ error: "session not found" }, 404);
+
     await agentManager.sendMessage(id, body.text);
     return c.json({ ok: true });
   } catch (err: unknown) {
-    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+    const msg = err instanceof Error ? err.message : "failed";
+    if (msg.includes("busy") || msg.includes("stopped")) {
+      return c.json({ error: msg }, 409);
+    }
+    return c.json({ error: msg }, 500);
   }
 });
 
@@ -349,8 +388,11 @@ app.post("/api/agents/:id/plan-approval", async (c) => {
   }
 });
 
-// DEBUG: Test question SSE delivery independently of SDK
+// DEBUG: Test question SSE delivery independently of SDK (dev only)
 app.post("/api/debug/test-question", async (c) => {
+  if (process.env.NODE_ENV === "production") {
+    return c.json({ error: "not found" }, 404);
+  }
   const body = await c.req.json<{ sessionId: string }>().catch(() => ({ sessionId: "" }));
   const sessionId = body.sessionId;
   if (!sessionId) return c.json({ error: "sessionId required" }, 400);
@@ -393,6 +435,13 @@ app.post("/api/agents/:id/mode", async (c) => {
   try {
     const id = c.req.param("id");
     const { mode } = await c.req.json<{ mode: string }>();
+
+    if (!VALID_PERMISSION_MODES.has(mode)) {
+      return c.json({ error: "invalid mode" }, 400);
+    }
+    const session = agentManager.getSession(id);
+    if (!session) return c.json({ error: "session not found" }, 404);
+
     await agentManager.setPermissionMode(id, mode as any);
     return c.json({ ok: true });
   } catch (err: unknown) {

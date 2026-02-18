@@ -113,13 +113,13 @@ export class AgentManager {
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
     this.onSessionChange = onSessionChange;
-    this.scanLaunchableRepos();
   }
 
   // --- Initialization ---
 
   async init(): Promise<void> {
     await ensureDataDir();
+    await this.scanLaunchableRepos();
     const restored = await loadAllSessions();
     for (const session of restored) {
       this.sessions.set(session.id, session);
@@ -398,6 +398,7 @@ export class AgentManager {
 
     // Set stopped status BEFORE aborting so consumeStream's catch block sees it
     session.status = "stopped";
+    session.hooksRunning = false;
 
     const controller = this.abortControllers.get(sessionId);
     if (controller) {
@@ -552,6 +553,7 @@ export class AgentManager {
       if (s && (s.status === "streaming" || s.status === "starting")) {
         s.status = "idle";
         s.turnStartedAt = undefined;
+        s.hooksRunning = false;
         this.persistSession(sessionId, true);
         this.onSessionChange(this.getSessions());
       }
@@ -588,6 +590,22 @@ export class AgentManager {
           session.model = initModel ?? session.model;
           this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());
+        } else if (msg.subtype === "hook_started" && (msg as any).hook_event === "Stop") {
+          // Stop hooks only run after the model's turn is complete — use it to
+          // set status to idle immediately rather than waiting for the result message.
+          if (session.status === "streaming" || session.status === "starting") {
+            session.status = "idle";
+            session.turnStartedAt = undefined;
+          }
+          session.hooksRunning = true;
+          this.persistSession(sessionId, true);
+          this.onSessionChange(this.getSessions());
+          this.onMessage({
+            id: `hook-status-${sessionId}`,
+            type: "system",
+            timestamp: new Date(),
+            hookStatus: "running",
+          }, session);
         }
         break;
       }
@@ -672,6 +690,16 @@ export class AgentManager {
       case "result": {
         session.lastActivity = new Date();
         session.turnStartedAt = undefined;
+
+        if (session.hooksRunning) {
+          session.hooksRunning = false;
+          this.onMessage({
+            id: `hook-status-${sessionId}`,
+            type: "system",
+            timestamp: new Date(),
+            hookStatus: "done",
+          }, session);
+        }
 
         if (msg.subtype === "success") {
           session.status = "idle";

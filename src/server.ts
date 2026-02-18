@@ -65,6 +65,10 @@ const prevStatuses = new Map<string, string>();
 const agentManager = new AgentManager(
   // onMessage callback
   (msg: AgentMessage, session: AgentSession) => {
+    if (msg.hookStatus) {
+      broadcast("hook-status", JSON.stringify({ state: msg.hookStatus }), session.id);
+      return;
+    }
     if (msg.permissionData || msg.questionData || msg.planApprovalData) {
       const html = renderMessage(msg);
       if (html) {

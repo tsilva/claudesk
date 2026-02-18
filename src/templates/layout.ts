@@ -30,6 +30,7 @@ export function renderLayout(
   <div class="app" hx-ext="sse" sse-connect="/events${activeSession ? `?session=${activeSession.id}` : ""}">
     <div hx-trigger="sse:notify" hx-swap="none" style="display:none"></div>
     <div hx-trigger="sse:turn-complete" hx-swap="none" style="display:none"></div>
+    <div hx-trigger="sse:hook-status" hx-swap="none" style="display:none"></div>
     <header class="header">
       <div class="header-left">
         <span class="logo">claudesk</span>

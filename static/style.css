@@ -2225,6 +2225,43 @@ button.launch-item {
   border-top: 1px solid var(--border-color);
 }
 
+/* --------------------------------------------------------------------------
+   Finishing Indicator (shown while stop hooks run after model reply)
+   -------------------------------------------------------------------------- */
+.finishing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 14px;
+  margin: 0 16px 2px 0;
+  border-left: 3px solid var(--border-color);
+  animation: fadeIn 0.15s ease;
+  opacity: 0.5;
+}
+
+.finishing-indicator-text {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+.finishing-indicator-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+.finishing-indicator-dot:nth-child(3) {
+  animation-delay: 0.15s;
+}
+
+.finishing-indicator-dot:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
 /* ==========================================================================
    Model Picker Popover
    ========================================================================== */

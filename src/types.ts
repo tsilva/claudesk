@@ -36,6 +36,7 @@ export interface AgentMessage {
   isError?: boolean;
   numTurns?: number;
   sessionId?: string;
+  hookStatus?: "running" | "done";
   permissionData?: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -134,6 +135,7 @@ export interface AgentSession {
   model: string;
   preset?: ModelPreset;
   permissionMode: PermissionMode;
+  hooksRunning?: boolean;
   pendingQuestion: PendingQuestion | null;
   pendingPlanApproval: PendingPlanApproval | null;
   pendingPermissions: Map<string, PendingPermission>;

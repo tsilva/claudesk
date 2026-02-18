@@ -776,6 +776,41 @@
     container.scrollTop = container.scrollHeight;
   }
 
+  // --- Finishing Indicator (shown while stop hooks run after model reply) ---
+
+  function showFinishingIndicator() {
+    var container = document.getElementById("conversation-stream");
+    if (!container) return;
+    removeFinishingIndicator();
+    var indicator = document.createElement("div");
+    indicator.className = "finishing-indicator";
+    indicator.id = "finishing-indicator";
+    indicator.innerHTML =
+      '<span class="finishing-indicator-text">Finishing up</span>' +
+      '<span class="finishing-indicator-dot"></span>' +
+      '<span class="finishing-indicator-dot"></span>' +
+      '<span class="finishing-indicator-dot"></span>';
+    container.appendChild(indicator);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function removeFinishingIndicator() {
+    var indicator = document.getElementById("finishing-indicator");
+    if (indicator) indicator.remove();
+  }
+
+  // Handle hook-status SSE events
+  document.body.addEventListener("htmx:sseMessage", function (e) {
+    if (e.detail.type !== "hook-status") return;
+    try {
+      var data = JSON.parse(e.detail.data);
+      if (data.state === "running") showFinishingIndicator();
+      else if (data.state === "done") removeFinishingIndicator();
+    } catch (err) {
+      // ignore parse errors
+    }
+  });
+
   // --- Typing Indicator ---
 
   function showTypingIndicator() {
@@ -809,6 +844,7 @@
       var root = temp.firstElementChild;
       if (!root || !root.classList.contains("message--user")) {
         removeTypingIndicator();
+        removeFinishingIndicator();
       }
       // Scroll to bottom after new content appended
       var container = document.getElementById("conversation-stream");
@@ -839,6 +875,7 @@
       }
     }
     removeTypingIndicator();
+    removeFinishingIndicator();
     // Scroll to bottom after footer injected
     requestAnimationFrame(function () {
       container.scrollTop = container.scrollHeight;

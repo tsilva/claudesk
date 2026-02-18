@@ -486,6 +486,41 @@
     event.target.value = ''; // Reset input for re-selection
   };
 
+  window.handleDragOver = function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    var stream = document.getElementById('conversation-stream');
+    if (stream) stream.classList.add('drag-over');
+  };
+
+  window.handleDragLeave = function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    var stream = document.getElementById('conversation-stream');
+    if (stream) stream.classList.remove('drag-over');
+  };
+
+  window.handleDrop = function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    var stream = document.getElementById('conversation-stream');
+    if (stream) stream.classList.remove('drag-over');
+    
+    var files = event.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    
+    for (var i = 0; i < files.length; i++) {
+      pendingFiles.push(files[i]);
+    }
+    updateAttachmentPreview();
+    
+    // Focus the message input after dropping files
+    var input = document.querySelector('.message-input');
+    if (input && !input.disabled) {
+      input.focus();
+    }
+  };
+
   window.removeAttachment = function (index) {
     pendingFiles.splice(index, 1);
     updateAttachmentPreview();

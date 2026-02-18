@@ -34,7 +34,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         ${renderSessionHeaderStatus(session)}
       </div>
     </div>
-    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
+    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div class="message-input-area">

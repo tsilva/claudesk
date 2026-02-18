@@ -459,8 +459,6 @@
 
     // Disable input while sending
     input.disabled = true;
-    var btn = form.querySelector(".message-send-btn");
-    if (btn) btn.disabled = true;
 
     createOptimisticUserMessage(text);
     showTypingIndicator();
@@ -482,7 +480,6 @@
       })
       .finally(function () {
         input.disabled = false;
-        if (btn) btn.disabled = false;
         input.focus();
       });
   };
@@ -668,25 +665,22 @@
   };
 
   window.cycleMode = function (sessionId) {
-    var btn = document.querySelector('.mode-cycle-btn');
-    if (!btn) return;
+    var indicator = document.querySelector('.mode-stat--interactive');
+    if (!indicator) return;
 
-    var currentLabel = btn.textContent.replace(/\s*\u21bb\s*$/, '').trim();
     var currentMode = 'plan';
-    for (var k in MODE_LABELS) {
-      if (MODE_LABELS[k] === currentLabel) { currentMode = k; break; }
-    }
-    // Normalize legacy 'default' to 'plan' for cycling
-    if (currentMode === 'default') currentMode = 'plan';
+    MODE_ORDER.forEach(function (m) {
+      if (indicator.classList.contains('mode-stat--' + m)) currentMode = m;
+    });
     var idx = MODE_ORDER.indexOf(currentMode);
     var nextMode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
 
     // Optimistic UI update
-    btn.textContent = MODE_LABELS[nextMode] + ' \u21bb';
-    btn.title = MODE_TOOLTIPS[nextMode] || MODE_TOOLTIPS.plan;
-    MODE_ORDER.forEach(function (m) { btn.classList.remove('mode--' + m); });
-    btn.classList.remove('mode--default');
-    btn.classList.add('mode--' + nextMode);
+    indicator.textContent = MODE_LABELS[nextMode];
+    indicator.title = (MODE_TOOLTIPS[nextMode] || MODE_TOOLTIPS.plan) + ' (shift+tab)';
+    MODE_ORDER.forEach(function (m) { indicator.classList.remove('mode-stat--' + m); });
+    indicator.classList.remove('mode-stat--default');
+    indicator.classList.add('mode-stat--' + nextMode);
 
     fetch('/api/agents/' + sessionId + '/mode', {
       method: 'POST',
@@ -694,6 +688,15 @@
       body: JSON.stringify({ mode: nextMode })
     });
   };
+
+  // Shift+Tab on message input cycles the permission mode
+  document.addEventListener('keydown', function (e) {
+    if (e.shiftKey && e.key === 'Tab' && document.activeElement && document.activeElement.classList.contains('message-input')) {
+      e.preventDefault();
+      var detail = document.activeElement.closest('[data-session-id]');
+      if (detail) cycleMode(detail.getAttribute('data-session-id'));
+    }
+  });
 
   // --- Optimistic User Message ---
 

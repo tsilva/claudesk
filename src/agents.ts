@@ -335,7 +335,7 @@ export class AgentManager {
     session.status = "streaming";
 
     if (accept) {
-      session.permissionMode = "plan";
+      session.permissionMode = "default";
       if (session.preset === 'opus-plan') {
         session.model = 'claude-sonnet-4-6';
         const q = this.queries.get(sessionId);
@@ -351,6 +351,12 @@ export class AgentManager {
 
     if (accept) {
       pending.resolve({ behavior: "allow", updatedPermissions: buildExitPlanPermissions(pending.suggestions) });
+      const q = this.queries.get(sessionId);
+      if (q && typeof (q as any).setPermissionMode === "function") {
+        (q as any).setPermissionMode("default").catch((err: unknown) =>
+          console.warn(`[plan-approval] setPermissionMode failed:`, err)
+        );
+      }
     } else {
       pending.resolve({ behavior: "deny", message: feedback || "User requested revision", interrupt: false });
     }
@@ -498,6 +504,7 @@ export class AgentManager {
         if (msg.subtype === "init") {
           session.sdkSessionId = msg.session_id;
           session.status = "streaming";
+          console.log(`[DEBUG init] session=${sessionId} requested_model=${session.model} init_model=${(msg as any).model}`);
           session.model = (msg as any).model ?? session.model;
           this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());

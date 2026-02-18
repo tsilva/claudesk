@@ -39,11 +39,6 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         <input type="text" name="text" class="message-input"
           placeholder="Send a message..." autocomplete="off"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>
-        <button type="button" class="mode-cycle-btn mode--${session.permissionMode === 'default' ? 'plan' : session.permissionMode}"
-          onclick="cycleMode('${session.id}')"
-          title="${escapeHtml(modeTooltip(session.permissionMode))}">${escapeHtml(modeLabel(session.permissionMode))} &#x21bb;</button>
-        <button type="submit" class="btn btn--primary message-send-btn"
-          ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>Send</button>
       </form>
     </div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">

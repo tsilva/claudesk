@@ -202,17 +202,18 @@ function friendlyModelName(model: string): string {
 export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
-  const mode = session.permissionMode && session.permissionMode !== 'default' && session.permissionMode !== 'plan'
-    ? modeLabel(session.permissionMode)
-    : "";
+  const currentMode = session.permissionMode === 'default' ? 'plan' : (session.permissionMode || 'plan');
   const modelLabel = session.model ? friendlyModelName(session.model) : "";
   return `<div class="stats-row">
+    <span class="stat mode-stat mode-stat--${currentMode} mode-stat--interactive"
+      onclick="cycleMode('${session.id}')"
+      title="${escapeHtml(modeTooltip(session.permissionMode))} (shift+tab)">${escapeHtml(modeLabel(session.permissionMode))}</span>
+    <span class="stat-sep">·</span>
     <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
     <span class="stat">${session.turnCount} turn${session.turnCount !== 1 ? "s" : ""}</span>
     ${cost ? `<span class="stat-sep">·</span><span class="stat">${cost}</span>` : ""}
     ${modelLabel ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(modelLabel)}</span>` : ""}
-    ${mode ? `<span class="stat-sep">·</span><span class="stat mode-stat mode-stat--${session.permissionMode}">${escapeHtml(mode)}</span>` : ""}
   </div>`;
 }
 

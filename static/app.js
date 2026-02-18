@@ -535,27 +535,62 @@
       return;
     }
     
-    var html = "";
+    // Clear container first
+    container.innerHTML = "";
+    
+    // Process each file
     for (var i = 0; i < pendingFiles.length; i++) {
-      var file = pendingFiles[i];
-      var sizeKb = Math.round(file.size / 1024);
-      var isImage = file.type.startsWith("image/");
-      var isPdf = file.type === "application/pdf";
-      
-      html += '<div class="attachment-chip' + (isPdf ? ' attachment-chip--pdf' : '') + '">';
-      if (isImage) {
-        html += '<span class="attachment-icon">🖼️</span>';
-      } else if (isPdf) {
-        html += '<span class="attachment-icon">📑</span>';
-      } else {
-        html += '<span class="attachment-icon">📄</span>';
-      }
-      html += '<span class="attachment-name">' + escapeHtml(file.name) + '</span>';
-      html += '<span class="attachment-size">' + sizeKb + ' KB</span>';
-      html += '<button type="button" class="attachment-remove" onclick="removeAttachment(' + i + ')">×</button>';
-      html += '</div>';
+      (function(index) {
+        var file = pendingFiles[index];
+        var isImage = file.type.startsWith("image/");
+        var isPdf = file.type === "application/pdf";
+        
+        var chip = document.createElement('div');
+        chip.className = 'attachment-chip' + (isPdf ? ' attachment-chip--pdf' : '');
+        
+        if (isImage) {
+          // Create image preview
+          var img = document.createElement('img');
+          img.className = 'attachment-thumbnail';
+          img.alt = '';
+          
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            img.src = e.target.result;
+          };
+          reader.readAsDataURL(file);
+          chip.appendChild(img);
+        } else if (isPdf) {
+          // PDF icon
+          var icon = document.createElement('span');
+          icon.className = 'attachment-icon';
+          icon.textContent = '📑';
+          chip.appendChild(icon);
+        } else {
+          // Generic file icon
+          var icon = document.createElement('span');
+          icon.className = 'attachment-icon';
+          icon.textContent = '📄';
+          chip.appendChild(icon);
+        }
+        
+        // Add filename
+        var name = document.createElement('span');
+        name.className = 'attachment-name';
+        name.textContent = file.name;
+        chip.appendChild(name);
+        
+        // Add remove button
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'attachment-remove';
+        removeBtn.textContent = '×';
+        removeBtn.onclick = function() { removeAttachment(index); };
+        chip.appendChild(removeBtn);
+        
+        container.appendChild(chip);
+      })(i);
     }
-    container.innerHTML = html;
   }
 
   function escapeHtml(text) {

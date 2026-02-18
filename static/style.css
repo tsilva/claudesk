@@ -619,20 +619,24 @@ ul, ol {
 .attachment-preview {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   padding: 6px 0;
   margin-bottom: 4px;
 }
 
 .attachment-chip {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 6px;
+  font-size: 10px;
+  position: relative;
+  overflow: hidden;
 }
 
 .attachment-chip--pdf {
@@ -640,36 +644,67 @@ ul, ol {
   background: rgba(217, 119, 87, 0.1);
 }
 
+.attachment-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .attachment-icon {
-  font-size: 12px;
+  font-size: 24px;
+  line-height: 1;
 }
 
 .attachment-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
+  background: rgba(20, 20, 19, 0.85);
   color: var(--text-primary);
-  max-width: 120px;
+  font-size: 9px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
 .attachment-size {
-  color: var(--text-dim);
-  font-size: 10px;
+  display: none;
 }
 
 .attachment-remove {
-  background: none;
-  border: none;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
   padding: 0;
-  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.attachment-chip:hover .attachment-remove {
+  opacity: 1;
 }
 
 .attachment-remove:hover {
   color: var(--status-orange);
+  background: var(--bg-tertiary);
+  border-color: var(--status-orange);
 }
 
 .message-input-actions {

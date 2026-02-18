@@ -45,6 +45,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
           placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
           onkeydown="handleMessageKeydown(event, '${session.id}')"
+          onpaste="handleMessagePaste(event)"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}></textarea>
         <div class="drop-zone-hint">Drop files here to attach</div>
       </form>

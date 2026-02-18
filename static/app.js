@@ -472,6 +472,27 @@
     }
   };
 
+  window.handleMessagePaste = function (event) {
+    var items = event.clipboardData && event.clipboardData.items;
+    if (!items) return;
+    
+    var hasFiles = false;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        var file = items[i].getAsFile();
+        if (file) {
+          pendingFiles.push(file);
+          hasFiles = true;
+        }
+      }
+    }
+    
+    if (hasFiles) {
+      event.preventDefault();
+      updateAttachmentPreview();
+    }
+  };
+
   // --- File Upload ---
   var pendingFiles = [];
 

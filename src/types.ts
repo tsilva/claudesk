@@ -114,6 +114,8 @@ export type PermissionUpdate =
 
 // --- Agent Session ---
 
+export type ModelPreset = 'opus' | 'sonnet' | 'opus-plan';
+
 export interface AgentSession {
   id: string;
   sdkSessionId: string;
@@ -129,6 +131,7 @@ export interface AgentSession {
   outputTokens: number;
   turnCount: number;
   model: string;
+  preset?: ModelPreset;
   permissionMode: PermissionMode;
   pendingQuestion: PendingQuestion | null;
   pendingPlanApproval: PendingPlanApproval | null;
@@ -198,6 +201,7 @@ export interface PersistedSession {
   outputTokens: number;
   turnCount: number;
   model: string;
+  preset?: ModelPreset;
   permissionMode: PermissionMode;
   messages: PersistedMessage[];
 }

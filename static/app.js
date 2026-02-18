@@ -372,11 +372,24 @@
 
   // --- Agent Interaction ---
 
-  window.createSession = function (cwd) {
+  var MODEL_PRESETS = {
+    opus: { label: "Opus", description: "Powerful — best for complex tasks", model: "claude-opus-4-6", permissionMode: "default" },
+    sonnet: { label: "Sonnet", description: "Fast & capable — great for most tasks", model: "claude-sonnet-4-6", permissionMode: "default" },
+    "opus-plan": { label: "Opus Plan", description: "Plans with Opus, executes with Sonnet", model: "claude-opus-4-6", permissionMode: "plan" },
+  };
+
+  window.createSession = function (cwd, presetKey) {
+    var preset = presetKey ? MODEL_PRESETS[presetKey] : null;
+    var body = { cwd: cwd };
+    if (preset) {
+      body.model = preset.model;
+      body.permissionMode = preset.permissionMode;
+      body.preset = presetKey;
+    }
     fetch("/api/agents/launch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd: cwd }),
+      body: JSON.stringify(body),
     })
       .then(function (res) { return res.json(); })
       .then(function (data) {
@@ -389,6 +402,53 @@
         console.error("Create session failed:", err);
       });
   };
+
+  // --- Model Picker Popover ---
+
+  var activePopover = null;
+
+  window.showModelPicker = function (event, cwd) {
+    event.stopPropagation();
+    dismissModelPicker();
+
+    var trigger = event.target;
+    var rect = trigger.getBoundingClientRect();
+
+    var popover = document.createElement("div");
+    popover.className = "model-picker-popover";
+    popover.style.top = (rect.bottom + window.scrollY + 4) + "px";
+    popover.style.left = (rect.left + window.scrollX) + "px";
+
+    Object.keys(MODEL_PRESETS).forEach(function (key) {
+      var p = MODEL_PRESETS[key];
+      var opt = document.createElement("button");
+      opt.className = "model-picker-option";
+      opt.type = "button";
+      opt.innerHTML =
+        '<span class="model-picker-label">' + escapeHtmlClient(p.label) + '</span>' +
+        '<span class="model-picker-desc">' + escapeHtmlClient(p.description) + '</span>';
+      opt.onclick = function (e) {
+        e.stopPropagation();
+        dismissModelPicker();
+        createSession(cwd, key);
+      };
+      popover.appendChild(opt);
+    });
+
+    document.body.appendChild(popover);
+    activePopover = popover;
+  };
+
+  function dismissModelPicker() {
+    if (activePopover) {
+      activePopover.remove();
+      activePopover = null;
+    }
+  }
+
+  document.addEventListener("click", function () {
+    dismissModelPicker();
+  });
 
   window.sendMessage = function (event, sessionId) {
     event.preventDefault();
@@ -593,10 +653,18 @@
 
   // --- Permission Mode Cycling ---
 
-  var MODE_ORDER = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
+  var MODE_ORDER = ['plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
   var MODE_LABELS = {
-    default: 'Default', plan: 'Plan', acceptEdits: 'Accept Edits',
+    default: 'Plan', plan: 'Plan', acceptEdits: 'Accept Edits',
     bypassPermissions: 'Bypass', delegate: 'Delegate', dontAsk: "Don't Ask"
+  };
+  var MODE_TOOLTIPS = {
+    default: 'Agent creates a plan for approval before making changes',
+    plan: 'Agent creates a plan for approval before making changes',
+    acceptEdits: 'Agent can read and edit files freely, asks before running commands',
+    bypassPermissions: 'Agent runs all tools without asking — use with caution',
+    delegate: 'Agent works independently, notifies you only on completion',
+    dontAsk: 'Agent remembers your choices and stops asking for repeated tools'
   };
 
   window.cycleMode = function (sessionId) {
@@ -604,16 +672,20 @@
     if (!btn) return;
 
     var currentLabel = btn.textContent.replace(/\s*\u21bb\s*$/, '').trim();
-    var currentMode = 'default';
+    var currentMode = 'plan';
     for (var k in MODE_LABELS) {
       if (MODE_LABELS[k] === currentLabel) { currentMode = k; break; }
     }
+    // Normalize legacy 'default' to 'plan' for cycling
+    if (currentMode === 'default') currentMode = 'plan';
     var idx = MODE_ORDER.indexOf(currentMode);
     var nextMode = MODE_ORDER[(idx + 1) % MODE_ORDER.length];
 
     // Optimistic UI update
     btn.textContent = MODE_LABELS[nextMode] + ' \u21bb';
+    btn.title = MODE_TOOLTIPS[nextMode] || MODE_TOOLTIPS.plan;
     MODE_ORDER.forEach(function (m) { btn.classList.remove('mode--' + m); });
+    btn.classList.remove('mode--default');
     btn.classList.add('mode--' + nextMode);
 
     fetch('/api/agents/' + sessionId + '/mode', {

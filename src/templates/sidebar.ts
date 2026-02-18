@@ -38,7 +38,7 @@ export function renderSidebar(
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repoName)}')">&#9734;</span>
         <span>${escapeHtml(repoName)}</span>
         ${renderGitBadges(groupStatus)}
-        <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
+        <span class="launch-item-action" onclick="event.stopPropagation(); showModelPicker(event, '${escapeHtml(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
     for (const session of repoSessions) {
@@ -57,15 +57,13 @@ export function renderSidebar(
         <div class="session-card-row">
           ${statusDot(session.status)}
           <span class="session-card-slug">${escapeHtml(slug)}</span>
+          <span class="session-card-tokens">${formatTokens(totalTokens)}</span>
           <span class="session-card-time"
                 data-last-activity="${session.lastActivity.toISOString()}"
                 data-status="${session.status}">${relativeTime(session.lastActivity)}</span>
           <button class="dismiss-btn" onclick="event.stopPropagation(); dismissSession('${session.id}')" title="Dismiss session">&times;</button>
         </div>
         <div class="session-card-preview">${escapeHtml(preview)}</div>
-        <div class="session-card-meta">
-          <span class="tokens">${formatTokens(totalTokens)}</span>
-        </div>
       </div>`;
     }
 
@@ -81,7 +79,7 @@ export function renderSidebar(
       <div class="launch-section-header">Launch</div>`;
 
     for (const repo of launchRepos) {
-      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeHtml(repo.path)}')">
+      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="showModelPicker(event, '${escapeHtml(repo.path)}')">
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeHtml(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>
         ${renderGitBadges(repo.gitStatus)}

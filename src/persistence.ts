@@ -71,6 +71,7 @@ export function serializeSession(session: AgentSession): PersistedSession {
     outputTokens: session.outputTokens,
     turnCount: session.turnCount,
     model: session.model,
+    preset: session.preset,
     permissionMode: session.permissionMode,
     messages: session.messages.map(serializeMessage),
   };
@@ -92,6 +93,7 @@ export function deserializeSession(data: PersistedSession): AgentSession {
     outputTokens: data.outputTokens,
     turnCount: data.turnCount,
     model: data.model,
+    preset: data.preset,
     permissionMode: data.permissionMode,
     pendingPermissions: new Map(),
     pendingQuestion: null,

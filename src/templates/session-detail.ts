@@ -1,5 +1,5 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, modeLabel } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, modeLabel, modeTooltip } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
   // Find non-error result message to fold into last assistant message
@@ -39,9 +39,9 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         <input type="text" name="text" class="message-input"
           placeholder="Send a message..." autocomplete="off"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>
-        <button type="button" class="mode-cycle-btn mode--${session.permissionMode}"
+        <button type="button" class="mode-cycle-btn mode--${session.permissionMode === 'default' ? 'plan' : session.permissionMode}"
           onclick="cycleMode('${session.id}')"
-          title="Permission mode (click to cycle)">${escapeHtml(modeLabel(session.permissionMode))} &#x21bb;</button>
+          title="${escapeHtml(modeTooltip(session.permissionMode))}">${escapeHtml(modeLabel(session.permissionMode))} &#x21bb;</button>
         <button type="submit" class="btn btn--primary message-send-btn"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>Send</button>
       </form>

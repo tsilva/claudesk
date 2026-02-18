@@ -3,23 +3,35 @@ import { renderMarkdown } from "../markdown.ts";
 
 // --- Permission Mode ---
 
-const MODE_ORDER: PermissionMode[] = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
+const MODE_ORDER: PermissionMode[] = ['plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
 const MODE_LABELS: Record<PermissionMode, string> = {
-  default: 'Default',
+  default: 'Plan',  // legacy sessions display as Plan
   plan: 'Plan',
   acceptEdits: 'Accept Edits',
   bypassPermissions: 'Bypass',
   delegate: 'Delegate',
   dontAsk: "Don't Ask",
 };
+const MODE_TOOLTIPS: Record<string, string> = {
+  default: 'Agent creates a plan for approval before making changes',
+  plan: 'Agent creates a plan for approval before making changes',
+  acceptEdits: 'Agent can read and edit files freely, asks before running commands',
+  bypassPermissions: 'Agent runs all tools without asking — use with caution',
+  delegate: 'Agent works independently, notifies you only on completion',
+  dontAsk: 'Agent remembers your choices and stops asking for repeated tools',
+};
 
 export function modeLabel(mode: PermissionMode): string {
-  return MODE_LABELS[mode] || MODE_LABELS.default;
+  return MODE_LABELS[mode] || MODE_LABELS.plan;
+}
+
+export function modeTooltip(mode: PermissionMode): string {
+  return MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.plan;
 }
 
 export function nextMode(mode: PermissionMode): PermissionMode {
   const idx = MODE_ORDER.indexOf(mode);
-  return MODE_ORDER[(idx + 1) % MODE_ORDER.length] ?? 'default';
+  return MODE_ORDER[(idx + 1) % MODE_ORDER.length] ?? 'plan';
 }
 
 // --- Escaping ---
@@ -176,20 +188,30 @@ export function renderSessionHeaderStatus(session: AgentSession): string {
     ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}`;
 }
 
+// --- Model Names ---
+
+function friendlyModelName(model: string): string {
+  if (model.startsWith('claude-opus-4')) return 'Opus 4.6';
+  if (model.startsWith('claude-sonnet-4')) return 'Sonnet 4.6';
+  if (model.startsWith('claude-haiku')) return 'Haiku';
+  return model;
+}
+
 // --- Session Stats ---
 
 export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
-  const mode = session.permissionMode && session.permissionMode !== 'default'
+  const mode = session.permissionMode && session.permissionMode !== 'default' && session.permissionMode !== 'plan'
     ? modeLabel(session.permissionMode)
     : "";
+  const modelLabel = session.model ? friendlyModelName(session.model) : "";
   return `<div class="stats-row">
     <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
     <span class="stat">${session.turnCount} turn${session.turnCount !== 1 ? "s" : ""}</span>
     ${cost ? `<span class="stat-sep">·</span><span class="stat">${cost}</span>` : ""}
-    ${session.model ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(session.model)}</span>` : ""}
+    ${modelLabel ? `<span class="stat-sep">·</span><span class="stat">${escapeHtml(modelLabel)}</span>` : ""}
     ${mode ? `<span class="stat-sep">·</span><span class="stat mode-stat mode-stat--${session.permissionMode}">${escapeHtml(mode)}</span>` : ""}
   </div>`;
 }

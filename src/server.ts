@@ -285,11 +285,11 @@ app.delete("/sessions/:id", async (c) => {
 // Create a new session (no prompt required)
 app.post("/api/agents/launch", async (c) => {
   try {
-    const body = await c.req.json<{ cwd: string; model?: string; permissionMode?: string }>();
-    const { cwd, model, permissionMode } = body;
+    const body = await c.req.json<{ cwd: string; model?: string; permissionMode?: string; preset?: string }>();
+    const { cwd, model, permissionMode, preset } = body;
     if (!cwd) return c.json({ error: "cwd required" }, 400);
 
-    const session = agentManager.createSession(cwd, model, permissionMode as any);
+    const session = agentManager.createSession(cwd, model, permissionMode as any, preset as any);
     return c.json({ ok: true, sessionId: session.id });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "launch failed" }, 500);

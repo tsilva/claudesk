@@ -16,6 +16,7 @@ import type {
   PermissionResult,
   PermissionMode,
   PermissionUpdate,
+  ModelPreset,
 } from "./types.ts";
 import {
   ensureDataDir,
@@ -159,7 +160,7 @@ export class AgentManager {
 
   // --- Public API ---
 
-  createSession(cwd: string, model?: string, permissionMode?: PermissionMode): AgentSession {
+  createSession(cwd: string, model?: string, permissionMode?: PermissionMode, preset?: ModelPreset): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
 
@@ -178,7 +179,8 @@ export class AgentManager {
       outputTokens: 0,
       turnCount: 0,
       model: model || "claude-opus-4-6",
-      permissionMode: permissionMode || "default",
+      preset,
+      permissionMode: permissionMode || "plan",
       pendingQuestion: null,
       pendingPlanApproval: null,
       pendingPermissions: new Map(),
@@ -192,8 +194,8 @@ export class AgentManager {
     return session;
   }
 
-  async launch(cwd: string, prompt: string, model?: string, permissionMode?: PermissionMode): Promise<AgentSession> {
-    const session = this.createSession(cwd, model, permissionMode);
+  async launch(cwd: string, prompt: string, model?: string, permissionMode?: PermissionMode, preset?: ModelPreset): Promise<AgentSession> {
+    const session = this.createSession(cwd, model, permissionMode, preset);
     await this.scanLaunchableRepos();
     await this.sendMessage(session.id, prompt);
     return session;
@@ -333,7 +335,16 @@ export class AgentManager {
     session.status = "streaming";
 
     if (accept) {
-      session.permissionMode = "default";
+      session.permissionMode = "plan";
+      if (session.preset === 'opus-plan') {
+        session.model = 'claude-sonnet-4-6';
+        const q = this.queries.get(sessionId);
+        if (q && typeof (q as any).setModel === 'function') {
+          (q as any).setModel('claude-sonnet-4-6').catch((err: unknown) =>
+            console.warn(`[model-switch] setModel failed:`, err)
+          );
+        }
+      }
     }
 
     this.onSessionChange(this.getSessions());

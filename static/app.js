@@ -97,6 +97,7 @@
           body: body,
           tag: "claudesk-" + sid,
           silent: false,
+          icon: data.logoUrl || undefined,
         });
 
         n.onclick = function () {
@@ -297,7 +298,7 @@
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");
       if (container) {
-        container.scrollTop = container.scrollHeight;
+        container.scrollTop = 0;
       }
       // Focus message input when session loads
       var input = document.querySelector(".message-input");
@@ -850,23 +851,23 @@
       var container = document.getElementById("conversation-stream");
       if (container) {
         requestAnimationFrame(function () {
-          container.scrollTop = container.scrollHeight;
+          container.scrollTop = 0;
         });
       }
     }
   });
 
-  // Handle turn-complete: inject stats footer into last assistant message
+  // Handle turn-complete: inject stats footer into first (newest) assistant message
   document.body.addEventListener("htmx:sseMessage", function (e) {
     if (e.detail.type !== "turn-complete") return;
     var container = document.getElementById("conversation-stream");
     if (!container) return;
 
-    // Target the LAST assistant message (chronological order — newest at bottom)
+    // Target the FIRST assistant message (visual order — newest at top due to column-reverse)
     var allAssistants = container.querySelectorAll(".message--assistant");
-    var lastAssistant = allAssistants[allAssistants.length - 1] || null;
-    if (lastAssistant) {
-      var content = lastAssistant.querySelector(".message-content");
+    var firstAssistant = allAssistants[0] || null;
+    if (firstAssistant) {
+      var content = firstAssistant.querySelector(".message-content");
       if (content) {
         // Remove any existing footer first
         var existing = content.querySelector(".turn-complete-footer");
@@ -876,9 +877,9 @@
     }
     removeTypingIndicator();
     removeFinishingIndicator();
-    // Scroll to bottom after footer injected
+    // Scroll to top after footer injected
     requestAnimationFrame(function () {
-      container.scrollTop = container.scrollHeight;
+      container.scrollTop = 0;
     });
   });
 

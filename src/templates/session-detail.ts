@@ -6,17 +6,17 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
   const resultMsg = messages.findLast((msg) => msg.type === "result" && !msg.isError);
   const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
 
-  // Render initial messages in chronological order, injecting footer into last assistant message
+  // Render initial messages in chronological order, injecting footer into first assistant message (visual order reversed via CSS)
   let footerInjected = false;
   const messagesHtml = messages
     .map((msg, _i, arr) => {
       const html = renderMessage(msg);
       if (!html) return null;
-      // Inject footer into the last (newest) assistant message
+      // Inject footer into the first (newest) assistant message (array is reversed for display)
       if (!footerInjected && footerHtml && msg.type === "assistant") {
-        // Check if this is the last assistant message in the array
-        const lastAssistantIndex = arr.reduce((last, m, idx) => m.type === "assistant" ? idx : last, -1);
-        if (_i === lastAssistantIndex) {
+        // Check if this is the first assistant message in the array (newest when reversed)
+        const firstAssistantIndex = arr.findIndex((m) => m.type === "assistant");
+        if (_i === firstAssistantIndex) {
           footerInjected = true;
           return html.replace(/<\/div><\/div>$/, footerHtml + "</div></div>");
         }
@@ -34,7 +34,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         ${renderSessionHeaderStatus(session)}
       </div>
     </div>
-    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">
+    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div class="message-input-area">

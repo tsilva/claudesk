@@ -140,6 +140,7 @@ export interface AgentSession {
   pendingPlanApproval: PendingPlanApproval | null;
   pendingPermissions: Map<string, PendingPermission>;
   messages: AgentMessage[];
+  logoUrl?: string;
 }
 
 // --- Git Status ---
@@ -207,6 +208,7 @@ export interface PersistedSession {
   preset?: ModelPreset;
   permissionMode: PermissionMode;
   messages: PersistedMessage[];
+  logoUrl?: string;
 }
 
 // --- Launchable Repos ---
@@ -215,4 +217,5 @@ export interface LaunchableRepo {
   name: string;
   path: string;
   gitStatus?: RepoGitStatus;
+  logoUrl?: string;
 }

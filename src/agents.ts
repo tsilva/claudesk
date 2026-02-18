@@ -74,7 +74,7 @@ async function getRepoGitStatus(repoPath: string): Promise<RepoGitStatus> {
 
 // --- Callbacks ---
 
-type MessageCallback = (msg: AgentMessage, session: AgentSession) => void;
+type MessageCallback = (msg: AgentMessage, session: AgentSession) => void | Promise<void>;
 type SessionChangeCallback = (sessions: AgentSession[]) => void;
 
 // --- Plan Mode Helpers ---
@@ -511,19 +511,49 @@ export class AgentManager {
     return this.cachedPendingCounts;
   }
 
-  getSessionsNeedingAttention(): { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval" }[] {
-    const result: { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval" }[] = [];
+  async getSessionsNeedingAttention(): Promise<{ sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval"; logoUrl?: string }[]> {
+    const result: { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval"; logoUrl?: string }[] = [];
     for (const session of this.sessions.values()) {
       if (session.status !== "needs_input") continue;
+      const logoUrl = await this.getSessionLogoUrl(session.id);
       if (session.pendingPlanApproval) {
-        result.push({ sessionId: session.id, repoName: session.repoName, type: "plan_approval" });
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "plan_approval", logoUrl });
       } else if (session.pendingPermissions.size > 0) {
-        result.push({ sessionId: session.id, repoName: session.repoName, type: "permission" });
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "permission", logoUrl });
       } else if (session.pendingQuestion) {
-        result.push({ sessionId: session.id, repoName: session.repoName, type: "question" });
+        result.push({ sessionId: session.id, repoName: session.repoName, type: "question", logoUrl });
       }
     }
     return result;
+  }
+
+  async getSessionLogoUrl(sessionId: string): Promise<string | undefined> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+
+    // Check if we already have a logoUrl for this session
+    if (session.logoUrl) return session.logoUrl;
+
+    // Look up in launchable repos
+    const repo = this.launchableRepos.find((r) => r.path === session.cwd);
+    if (repo?.logoUrl) {
+      session.logoUrl = repo.logoUrl;
+      return repo.logoUrl;
+    }
+
+    // Check directly if logo.png exists
+    try {
+      const logoFile = Bun.file(join(session.cwd, "logo.png"));
+      if (await logoFile.exists()) {
+        const logoUrl = `/static/logo/${session.repoName}`;
+        session.logoUrl = logoUrl;
+        return logoUrl;
+      }
+    } catch {
+      // No logo.png found
+    }
+
+    return undefined;
   }
 
   getRecentMessages(sessionId: string, count = 50): AgentMessage[] {
@@ -992,7 +1022,19 @@ export class AgentManager {
           await stat(join(repoPath, ARCHIVED_MARKER));
           continue;
         } catch {}
-        repos.push({ name: entry.name, path: repoPath });
+
+        // Check for logo.png
+        let logoUrl: string | undefined;
+        try {
+          const logoPath = join(repoPath, "logo.png");
+          await stat(logoPath);
+          // Use a path that can be served statically
+          logoUrl = `/static/logo/${entry.name}`;
+        } catch {
+          // No logo.png found
+        }
+
+        repos.push({ name: entry.name, path: repoPath, logoUrl });
       }
 
       await Promise.all(repos.map(async (r) => {

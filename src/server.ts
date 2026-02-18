@@ -64,7 +64,7 @@ const prevStatuses = new Map<string, string>();
 
 const agentManager = new AgentManager(
   // onMessage callback
-  (msg: AgentMessage, session: AgentSession) => {
+  async (msg: AgentMessage, session: AgentSession) => {
     if (msg.hookStatus) {
       broadcast("hook-status", JSON.stringify({ state: msg.hookStatus }), session.id);
       return;
@@ -84,10 +84,12 @@ const agentManager = new AgentManager(
         // Desktop notification for pending prompts
         if (!msg.permissionData?.resolved && !msg.questionData?.resolved && !msg.planApprovalData?.resolved) {
           const event = msg.planApprovalData ? "plan_approval" : msg.permissionData ? "permission" : "question";
+          const logoUrl = await agentManager.getSessionLogoUrl(session.id);
           broadcast("notify", JSON.stringify({
             event,
             repoName: session.repoName,
             sessionId: session.id,
+            logoUrl,
           }));
         }
       }
@@ -107,16 +109,18 @@ const agentManager = new AgentManager(
     }
   },
   // onSessionChange callback
-  (sessions: AgentSession[]) => {
+  async (sessions: AgentSession[]) => {
     // Detect streaming/starting → idle transitions for completion notifications
     const activeSessionIds = new Set(sessions.map(s => s.id));
     for (const session of sessions) {
       const prev = prevStatuses.get(session.id);
       if ((prev === "streaming" || prev === "starting") && session.status === "idle") {
+        const logoUrl = await agentManager.getSessionLogoUrl(session.id);
         broadcast("notify", JSON.stringify({
           event: "complete",
           repoName: session.repoName,
           sessionId: session.id,
+          logoUrl,
         }));
       }
       prevStatuses.set(session.id, session.status);
@@ -144,6 +148,22 @@ const app = new Hono();
 
 // Static files
 app.use("/static/*", serveStatic({ root: "./" }));
+
+// Repo logo files - serve logo.png from each repo
+app.use("/static/logo/:repoName", async (c) => {
+  const repoName = c.req.param("repoName");
+  const repos = agentManager.getLaunchableRepos();
+  const repo = repos.find((r) => r.name === repoName);
+  if (!repo || !repo.logoUrl) {
+    return c.notFound();
+  }
+  const logoPath = `${repo.path}/logo.png`;
+  const file = Bun.file(logoPath);
+  if (!(await file.exists())) {
+    return c.notFound();
+  }
+  return new Response(file);
+});
 
 // Full page
 app.get("/", async (c) => {
@@ -197,11 +217,13 @@ app.get("/events", (c) => {
     client.send("sidebar", sidebarHtml);
 
     // Replay pending notifications for sessions needing attention
-    for (const pending of agentManager.getSessionsNeedingAttention()) {
+    const pendingSessions = await agentManager.getSessionsNeedingAttention();
+    for (const pending of pendingSessions) {
       client.send("notify", JSON.stringify({
         event: pending.type,
         repoName: pending.repoName,
         sessionId: pending.sessionId,
+        logoUrl: pending.logoUrl,
       }));
     }
 

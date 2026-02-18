@@ -47,6 +47,9 @@ logs/
 # claudesk session data
 .claudesk/
 
+# Git worktrees
+.worktrees/
+
 # Managed by tsilva/.github
 # Do not remove - synced automatically
 .claude/*.local.json

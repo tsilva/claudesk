@@ -296,17 +296,28 @@ export class AgentManager {
       options.resume = session.sdkSessionId;
     }
 
-    // Build prompt - use streaming input for images, string for text-only
+    // Build prompt - use streaming input for images/documents, string for text-only
     let prompt;
-    if (attachments && attachments.some(a => a.type.startsWith("image/"))) {
-      // Use streaming input mode for multimodal messages
-      const imageAttachments = attachments.filter(a => a.type.startsWith("image/"));
-      const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+    const hasVisualContent = attachments && attachments.some(a => 
+      a.type.startsWith("image/") || a.type === "application/pdf"
+    );
+    
+    if (hasVisualContent) {
+      // Use streaming input mode for multimodal messages (images + PDFs)
+      const imageAttachments = attachments!.filter(a => a.type.startsWith("image/"));
+      const pdfAttachments = attachments!.filter(a => a.type === "application/pdf");
+      
+      const content: Array<{ 
+        type: string; 
+        text?: string; 
+        source?: { type: string; media_type: string; data: string } 
+      }> = [];
       
       if (text?.trim()) {
         content.push({ type: "text", text });
       }
       
+      // Add image content blocks
       for (const img of imageAttachments) {
         content.push({
           type: "image",
@@ -314,6 +325,18 @@ export class AgentManager {
             type: "base64",
             media_type: img.type,
             data: img.data,
+          },
+        });
+      }
+      
+      // Add PDF document content blocks
+      for (const pdf of pdfAttachments) {
+        content.push({
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: pdf.data,
           },
         });
       }

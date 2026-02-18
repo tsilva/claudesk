@@ -505,10 +505,13 @@
       var file = pendingFiles[i];
       var sizeKb = Math.round(file.size / 1024);
       var isImage = file.type.startsWith("image/");
+      var isPdf = file.type === "application/pdf";
       
-      html += '<div class="attachment-chip">';
+      html += '<div class="attachment-chip' + (isPdf ? ' attachment-chip--pdf' : '') + '">';
       if (isImage) {
         html += '<span class="attachment-icon">🖼️</span>';
+      } else if (isPdf) {
+        html += '<span class="attachment-icon">📑</span>';
       } else {
         html += '<span class="attachment-icon">📄</span>';
       }

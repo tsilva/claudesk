@@ -595,6 +595,11 @@ ul, ol {
   color: var(--text-secondary);
 }
 
+.attachment--pdf {
+  border-color: var(--status-orange);
+  background: rgba(217, 119, 87, 0.1);
+}
+
 .attachment-file-icon {
   font-size: 12px;
 }
@@ -628,6 +633,11 @@ ul, ol {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 11px;
+}
+
+.attachment-chip--pdf {
+  border-color: var(--status-orange);
+  background: rgba(217, 119, 87, 0.1);
 }
 
 .attachment-icon {

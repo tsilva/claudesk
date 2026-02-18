@@ -496,6 +496,13 @@ function renderUserMessage(msg: AgentMessage): string {
         attachmentsHtml += `<div class="attachment attachment--image" onclick="openImageLightbox('${escapeHtml(att.data)}')">
           <img src="data:${escapeHtml(att.type)};base64,${escapeHtml(att.data)}" alt="${escapeHtml(att.name)}">
         </div>`;
+      } else if (att.type === "application/pdf") {
+        const sizeKb = Math.round(att.size / 1024);
+        attachmentsHtml += `<div class="attachment attachment--file attachment--pdf">
+          <span class="attachment-file-icon">📑</span>
+          <span class="attachment-file-name">${escapeHtml(att.name)}</span>
+          <span class="attachment-file-size">${sizeKb} KB</span>
+        </div>`;
       } else {
         const sizeKb = Math.round(att.size / 1024);
         attachmentsHtml += `<div class="attachment attachment--file">

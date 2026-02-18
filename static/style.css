@@ -1418,6 +1418,35 @@ button.launch-item {
   user-select: none;
 }
 
+.code-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.markdown-body pre.hljs:hover .code-copy-btn {
+  opacity: 1;
+}
+
+.code-copy-btn--copied {
+  color: var(--status-green);
+  opacity: 1 !important;
+}
+
+.markdown-body pre .code-lang ~ .code-copy-btn {
+  right: 56px;
+}
+
 .markdown-body ul,
 .markdown-body ol {
   margin: 6px 0;
@@ -1532,6 +1561,11 @@ button.launch-item {
   border-radius: 4px;
   color: var(--text-primary);
   outline: none;
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
+  field-sizing: content;
+  line-height: 1.5;
 }
 
 .message-input:focus {
@@ -1624,6 +1658,29 @@ button.launch-item {
 .permission-prompt-actions {
   display: flex;
   gap: 8px;
+}
+
+.deny-input-row {
+  display: none;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.deny-reason-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.deny-reason-input:focus {
+  border-color: var(--accent-orange);
 }
 
 /* --------------------------------------------------------------------------

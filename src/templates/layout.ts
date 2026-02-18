@@ -12,7 +12,7 @@ export function renderLayout(
   const sidebarHtml = renderSidebar(sessions, repos, activeSession?.id, pendingCounts);
   const detailHtml = activeSession
     ? renderSessionDetail(activeSession, messages)
-    : renderEmptyDetail();
+    : renderEmptyDetail(repos.length);
 
   return `<!DOCTYPE html>
 <html lang="en">

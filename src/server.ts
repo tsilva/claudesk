@@ -8,7 +8,7 @@ import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
 import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderTurnCompleteFooter } from "./templates/components.ts";
 
-const PORT = 3456;
+const PORT = parseInt(process.env.CLAUDESK_PORT || process.env.PORT || "3456", 10);
 
 // --- SSE Client Tracking ---
 
@@ -65,10 +65,6 @@ const prevStatuses = new Map<string, string>();
 const agentManager = new AgentManager(
   // onMessage callback
   (msg: AgentMessage, session: AgentSession) => {
-    if (msg.type === "system") {
-      console.log(`[DEBUG onMessage] system msg: "${msg.text}" session=${session.id}`);
-    }
-
     if (msg.permissionData || msg.questionData || msg.planApprovalData) {
       const html = renderMessage(msg);
       if (html) {
@@ -225,35 +221,41 @@ app.get("/sessions/:id/detail", async (c) => {
   const id = c.req.param("id");
   const session = agentManager.getSession(id);
   if (!session) {
-    return c.html(renderEmptyDetail());
+    const repoCount = agentManager.getLaunchableRepos().length;
+    return c.html(renderEmptyDetail(repoCount));
   }
   const messages = agentManager.getRecentMessages(id);
   return c.html(renderSessionDetail(session, messages));
 });
 
-// Focus the Cursor window for a session's repo
+// Focus the editor window for a session's repo
 app.post("/sessions/:id/focus", async (c) => {
   const id = c.req.param("id");
   const session = agentManager.getSession(id);
   if (!session) return c.json({ error: "not found" }, 404);
 
-  try {
-    const proc = Bun.spawn([
-      "/Users/tsilva/.claude/focus-window.sh",
-      session.cwd,
-    ]);
-    await proc.exited;
-    return c.json({ ok: true });
-  } catch {
-    return c.json({ error: "focus failed" }, 500);
+  // Try CLAUDESK_EDITOR env var, then common editors, then skip gracefully
+  const editorCandidates = process.env.CLAUDESK_EDITOR
+    ? [process.env.CLAUDESK_EDITOR]
+    : ["cursor", "code"];
+
+  for (const editor of editorCandidates) {
+    try {
+      const proc = Bun.spawn([editor, session.cwd], { stderr: "pipe" });
+      await proc.exited;
+      return c.json({ ok: true });
+    } catch {
+      // Try next candidate
+    }
   }
+
+  return c.json({ ok: true, skipped: true });
 });
 
 // Focus the claudesk browser window (via AeroSpace or fallback to open)
 app.post("/api/focus-dashboard", async (c) => {
   const body = await c.req.json<{ sessionId?: string }>().catch(() => ({}));
   const sessionId = (body as any)?.sessionId;
-  const AEROSPACE = "/opt/homebrew/bin/aerospace";
   const BROWSER_APPS = [
     "safari", "google chrome", "arc", "firefox",
     "brave browser", "microsoft edge", "chromium", "orion",
@@ -261,7 +263,7 @@ app.post("/api/focus-dashboard", async (c) => {
 
   try {
     const proc = Bun.spawn([
-      AEROSPACE, "list-windows", "--all",
+      "aerospace", "list-windows", "--all",
       "--format", "%{window-id}|%{app-name}|%{window-title}|%{workspace}",
     ]);
     const output = await new Response(proc.stdout).text();
@@ -283,22 +285,25 @@ app.post("/api/focus-dashboard", async (c) => {
 
     if (match) {
       if (match.workspace) {
-        const ws = Bun.spawn([AEROSPACE, "workspace", match.workspace]);
+        const ws = Bun.spawn(["aerospace", "workspace", match.workspace]);
         await ws.exited;
       }
-      const focus = Bun.spawn([AEROSPACE, "focus", "--window-id", match.windowId]);
+      const focus = Bun.spawn(["aerospace", "focus", "--window-id", match.windowId]);
       await focus.exited;
       return c.json({ ok: true, action: "focused" });
     }
   } catch {
-    // AeroSpace not available, fall through to open
+    // AeroSpace not available, fall through to platform open
   }
 
-  // Fallback: open in default browser
+  // Fallback: open in default browser (platform-appropriate)
   const url = sessionId
     ? `http://localhost:${PORT}/#session=${sessionId}`
     : `http://localhost:${PORT}/`;
-  const open = Bun.spawn(["open", url]);
+  const openCmd = process.platform === "win32" ? "start"
+    : process.platform === "darwin" ? "open"
+    : "xdg-open";
+  const open = Bun.spawn([openCmd, url]);
   await open.exited;
   return c.json({ ok: true, action: "opened" });
 });
@@ -406,48 +411,6 @@ app.post("/api/agents/:id/plan-approval", async (c) => {
   }
 });
 
-// DEBUG: Test question SSE delivery independently of SDK (dev only)
-app.post("/api/debug/test-question", async (c) => {
-  if (process.env.NODE_ENV === "production") {
-    return c.json({ error: "not found" }, 404);
-  }
-  const body = await c.req.json<{ sessionId: string }>().catch(() => ({ sessionId: "" }));
-  const sessionId = body.sessionId;
-  if (!sessionId) return c.json({ error: "sessionId required" }, 400);
-
-  const session = agentManager.getSession(sessionId);
-  if (!session) return c.json({ error: "session not found" }, 404);
-
-  const fakeMsg: AgentMessage = {
-    id: `q-debug-test`,
-    type: "system",
-    timestamp: new Date(),
-    text: "Debug question test",
-    sessionId,
-    questionData: {
-      questions: [
-        {
-          question: "Which language do you prefer?",
-          header: "Language",
-          options: [
-            { label: "TypeScript", description: "Typed JavaScript" },
-            { label: "Python", description: "General purpose" },
-            { label: "Rust", description: "Systems programming" },
-          ],
-          multiSelect: false,
-        },
-      ],
-      originalInput: {},
-    },
-  };
-
-  const html = renderMessage(fakeMsg);
-  const clientCount = Array.from(clients.values()).filter(cl => cl.sessionId === sessionId).length;
-  console.log(`[DEBUG test-question] broadcasting to ${clientCount} clients for session=${sessionId}`);
-  if (html) broadcast("stream-append", html, sessionId);
-  return c.json({ ok: true, clientCount });
-});
-
 // Change permission mode
 app.post("/api/agents/:id/mode", async (c) => {
   try {
@@ -484,3 +447,10 @@ export default {
 };
 
 console.log(`claudesk running at http://localhost:${PORT}`);
+
+if (!process.argv.includes("--no-open")) {
+  const openCmd = process.platform === "win32" ? "start"
+    : process.platform === "darwin" ? "open"
+    : "xdg-open";
+  Bun.spawn([openCmd, `http://localhost:${PORT}`]);
+}

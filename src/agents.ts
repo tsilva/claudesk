@@ -1,7 +1,6 @@
 import { query, type Query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { readdir, stat } from "fs/promises";
 import { join, basename } from "path";
-import { homedir } from "os";
 import type {
   AgentSession,
   AgentMessage,
@@ -24,10 +23,10 @@ import {
   loadAllSessions,
   deleteSessionFile,
 } from "./persistence.ts";
+import { getReposDir } from "./config.ts";
 
 // --- Constants ---
 
-const REPOS_DIR = join(homedir(), "repos", "tsilva");
 const ARCHIVED_MARKER = ".archived";
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -258,7 +257,6 @@ export class AgentManager {
       env,
       settingSources: ['user', 'project', 'local'],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
-        console.log(`[DEBUG canUseTool] tool=${toolName} session=${sessionId}`);
         return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID, opts.suggestions as PermissionUpdate[] | undefined);
       },
     };
@@ -807,7 +805,6 @@ export class AgentManager {
     input: Record<string, unknown>,
     toolUseId: string,
   ): Promise<PermissionResult> {
-    console.log(`[DEBUG handleAskUserQuestion] session=${session.id} questions=${JSON.stringify(input.questions).slice(0, 200)}`);
     const rawQuestions = Array.isArray(input.questions) ? input.questions : [];
     const questions: QuestionItem[] = rawQuestions.map((q: any) => ({
       question: String(q.question ?? ""),
@@ -870,7 +867,6 @@ export class AgentManager {
       };
       session.messages.push(qMsg);
       this.onMessage(qMsg, session);
-      console.log(`[DEBUG handleAskUserQuestion] dispatched inline question message for session=${session.id}`);
     });
   }
 
@@ -948,7 +944,8 @@ export class AgentManager {
 
   async scanLaunchableRepos(): Promise<void> {
     try {
-      const entries = await readdir(REPOS_DIR, { withFileTypes: true });
+      const reposDir = await getReposDir();
+      const entries = await readdir(reposDir, { withFileTypes: true });
       const activeCwds = new Set(
         Array.from(this.sessions.values()).map((s) => s.cwd)
       );
@@ -956,7 +953,7 @@ export class AgentManager {
       const repos: LaunchableRepo[] = [];
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        const repoPath = join(REPOS_DIR, entry.name);
+        const repoPath = join(reposDir, entry.name);
         if (activeCwds.has(repoPath)) continue;
         try {
           await stat(join(repoPath, ".git"));

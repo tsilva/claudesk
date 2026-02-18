@@ -6,17 +6,20 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
   const resultMsg = messages.findLast((msg) => msg.type === "result" && !msg.isError);
   const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
 
-  // Render initial messages, injecting footer into the last assistant message
-  const reversed = messages.slice().reverse();
+  // Render initial messages in chronological order, injecting footer into last assistant message
   let footerInjected = false;
-  const messagesHtml = reversed
-    .map((msg) => {
+  const messagesHtml = messages
+    .map((msg, _i, arr) => {
       const html = renderMessage(msg);
       if (!html) return null;
-      // Inject footer into the first (newest) assistant message
-      if (!footerInjected && footerHtml && msg.type === "assistant" && html) {
-        footerInjected = true;
-        return html.replace(/<\/div><\/div>$/, footerHtml + "</div></div>");
+      // Inject footer into the last (newest) assistant message
+      if (!footerInjected && footerHtml && msg.type === "assistant") {
+        // Check if this is the last assistant message in the array
+        const lastAssistantIndex = arr.reduce((last, m, idx) => m.type === "assistant" ? idx : last, -1);
+        if (_i === lastAssistantIndex) {
+          footerInjected = true;
+          return html.replace(/<\/div><\/div>$/, footerHtml + "</div></div>");
+        }
       }
       return html;
     })
@@ -31,14 +34,16 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         ${renderSessionHeaderStatus(session)}
       </div>
     </div>
-    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="afterbegin">
+    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div class="message-input-area">
       <form id="message-form" onsubmit="sendMessage(event, '${session.id}')">
-        <input type="text" name="text" class="message-input"
-          placeholder="Send a message..." autocomplete="off"
-          ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}>
+        <textarea name="text" class="message-input" rows="1"
+          placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          onkeydown="handleMessageKeydown(event, '${session.id}')"
+          ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}></textarea>
       </form>
     </div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
@@ -47,10 +52,17 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
   </div>`;
 }
 
-export function renderEmptyDetail(): string {
+export function renderEmptyDetail(repoCount = 0): string {
+  if (repoCount === 0) {
+    return `<div class="empty-state">
+      <div class="empty-state-icon">&#9673;</div>
+      <div class="empty-state-text">No git repos found</div>
+      <div class="empty-state-hint">No git repos found in your configured directory.<br>Run <code>claudesk --setup</code> to reconfigure.</div>
+    </div>`;
+  }
   return `<div class="empty-state">
     <div class="empty-state-icon">&#9673;</div>
-    <div class="empty-state-text">Select a session or launch a new agent</div>
-    <div class="empty-state-hint">Choose a repo from the sidebar and enter a prompt to get started</div>
+    <div class="empty-state-text">Pick a repo and choose a model to start</div>
+    <div class="empty-state-hint">Select a repo from the sidebar to launch a new agent session</div>
   </div>`;
 }

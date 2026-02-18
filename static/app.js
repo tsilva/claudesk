@@ -297,7 +297,7 @@
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");
       if (container) {
-        container.scrollTop = 0;
+        container.scrollTop = container.scrollHeight;
       }
       // Focus message input when session loads
       var input = document.querySelector(".message-input");
@@ -454,6 +454,23 @@
     dismissModelPicker();
   });
 
+  window.handleMessageKeydown = function (event, sessionId) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      var form = event.target.closest('form');
+      if (form) {
+        var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form.dispatchEvent(submitEvent);
+      }
+    }
+    // Shift+Tab cycles permission mode
+    if (event.shiftKey && event.key === 'Tab') {
+      event.preventDefault();
+      var detail = event.target.closest('[data-session-id]');
+      if (detail) cycleMode(detail.getAttribute('data-session-id'));
+    }
+  };
+
   window.sendMessage = function (event, sessionId) {
     event.preventDefault();
     var form = event.target;
@@ -468,7 +485,7 @@
     showTypingIndicator();
 
     var container = document.getElementById("conversation-stream");
-    if (container) container.scrollTop = 0;
+    if (container) container.scrollTop = container.scrollHeight;
 
     fetch("/api/agents/" + sessionId + "/message", {
       method: "POST",
@@ -501,9 +518,17 @@
     });
   };
 
-  window.denyPermission = function (sessionId, toolUseId) {
-    var message = prompt("Denial reason (optional):");
-    if (message === null) return; // User cancelled the prompt dialog
+  window.showDenyInput = function (sessionId, toolUseId, btn) {
+    var row = document.getElementById("deny-row-" + toolUseId);
+    if (!row) return;
+    row.style.display = "flex";
+    var input = row.querySelector(".deny-reason-input");
+    if (input) input.focus();
+    btn.style.display = "none";
+  };
+
+  window.confirmDeny = function (sessionId, toolUseId, inputEl) {
+    var message = inputEl ? inputEl.value.trim() : "";
     seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
     fetch("/api/agents/" + sessionId + "/permission", {
@@ -513,6 +538,11 @@
     }).catch(function () {
       removeTypingIndicator();
     });
+  };
+
+  window.denyPermission = function (sessionId, toolUseId) {
+    // Legacy fallback — should not be called since deny button now uses showDenyInput
+    confirmDeny(sessionId, toolUseId, null);
   };
 
   // --- Question Interaction ---
@@ -648,6 +678,31 @@
     });
   };
 
+  window.copyCode = function (btn, encodedText) {
+    var text = decodeURIComponent(encodedText);
+    navigator.clipboard.writeText(text).then(function () {
+      var orig = btn.textContent;
+      btn.textContent = "Copied!";
+      btn.classList.add("code-copy-btn--copied");
+      setTimeout(function () {
+        btn.textContent = orig;
+        btn.classList.remove("code-copy-btn--copied");
+      }, 2000);
+    }).catch(function () {
+      // Fallback for older browsers
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = "Copy"; }, 2000);
+    });
+  };
+
   window.stopAgent = function (sessionId) {
     fetch("/api/agents/" + sessionId + "/stop", {
       method: "POST",
@@ -700,14 +755,7 @@
     });
   };
 
-  // Shift+Tab on message input cycles the permission mode
-  document.addEventListener('keydown', function (e) {
-    if (e.shiftKey && e.key === 'Tab' && document.activeElement && document.activeElement.classList.contains('message-input')) {
-      e.preventDefault();
-      var detail = document.activeElement.closest('[data-session-id]');
-      if (detail) cycleMode(detail.getAttribute('data-session-id'));
-    }
-  });
+  // Shift+Tab cycles permission mode — handled in handleMessageKeydown on textarea
 
   // --- Optimistic User Message ---
 
@@ -724,7 +772,8 @@
     msg.className = "message message--user";
     msg.id = "optimistic-user-msg";
     msg.innerHTML = '<div class="message-content">' + escapeHtmlClient(text) + '</div>';
-    container.prepend(msg);
+    container.appendChild(msg);
+    container.scrollTop = container.scrollHeight;
   }
 
   // --- Typing Indicator ---
@@ -741,7 +790,8 @@
       '<div class="typing-indicator-dot"></div>' +
       '<div class="typing-indicator-dot"></div>' +
       '<div class="typing-indicator-dot"></div>';
-    container.prepend(indicator);
+    container.appendChild(indicator);
+    container.scrollTop = container.scrollHeight;
   }
 
   function removeTypingIndicator() {
@@ -750,6 +800,7 @@
   }
 
   // Remove typing indicator when first agent response arrives (skip user messages)
+  // Also scroll to bottom when new content arrives
   document.body.addEventListener("htmx:sseMessage", function (e) {
     if (e.detail.type === "stream-append") {
       var data = e.detail.data || "";
@@ -758,6 +809,13 @@
       var root = temp.firstElementChild;
       if (!root || !root.classList.contains("message--user")) {
         removeTypingIndicator();
+      }
+      // Scroll to bottom after new content appended
+      var container = document.getElementById("conversation-stream");
+      if (container) {
+        requestAnimationFrame(function () {
+          container.scrollTop = container.scrollHeight;
+        });
       }
     }
   });
@@ -768,7 +826,9 @@
     var container = document.getElementById("conversation-stream");
     if (!container) return;
 
-    var lastAssistant = container.querySelector(".message--assistant");
+    // Target the LAST assistant message (chronological order — newest at bottom)
+    var allAssistants = container.querySelectorAll(".message--assistant");
+    var lastAssistant = allAssistants[allAssistants.length - 1] || null;
     if (lastAssistant) {
       var content = lastAssistant.querySelector(".message-content");
       if (content) {
@@ -779,6 +839,10 @@
       }
     }
     removeTypingIndicator();
+    // Scroll to bottom after footer injected
+    requestAnimationFrame(function () {
+      container.scrollTop = container.scrollHeight;
+    });
   });
 
   // --- Elapsed Timer ---

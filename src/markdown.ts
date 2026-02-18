@@ -21,7 +21,9 @@ const marked = new Marked({
       const langLabel = language
         ? `<span class="code-lang">${escapeHtmlAttr(language)}</span>`
         : "";
-      return `<pre class="hljs">${langLabel}<code>${highlighted}</code></pre>`;
+      const encodedText = encodeURIComponent(text);
+      const copyBtn = `<button class="code-copy-btn" onclick="copyCode(this,'${encodedText}')" title="Copy code">Copy</button>`;
+      return `<pre class="hljs">${langLabel}${copyBtn}<code>${highlighted}</code></pre>`;
     },
     link({ href, text }) {
       // Strip javascript: and data: protocol links to prevent XSS

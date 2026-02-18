@@ -377,7 +377,12 @@ function renderPermissionMessage(msg: AgentMessage): string {
         <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
         <div class="permission-prompt-actions">
           <button class="btn btn--primary" onclick="approvePermission('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}')">Allow</button>
-          <button class="btn" onclick="denyPermission('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}')">Deny</button>
+          <button class="btn" onclick="showDenyInput('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}', this)">Deny</button>
+        </div>
+        <div class="deny-input-row" id="deny-row-${escapeHtml(toolUseId)}" style="display:none">
+          <input type="text" class="deny-reason-input" placeholder="Denial reason (optional)..."
+            onkeydown="if(event.key==='Enter'){event.preventDefault();confirmDeny('${escapeHtml(sid)}','${escapeHtml(toolUseId)}',this)}">
+          <button class="btn" onclick="confirmDeny('${escapeHtml(sid)}','${escapeHtml(toolUseId)}',this.previousElementSibling)">Confirm Deny</button>
         </div>
       </div>
     </div>

@@ -45,6 +45,11 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
+/** Escape a string for safe embedding inside a single-quoted JS string literal in an HTML attribute. */
+export function escapeJs(str: string): string {
+  return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
 // --- Status ---
 
 export function statusDot(status: AgentStatus): string {
@@ -246,7 +251,7 @@ export function renderPermissionPrompt(permission: PendingPermission, sessionId:
 
 // --- Question Prompt ---
 
-export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string): string {
+export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string, msgId?: string): string {
   const singleQuestionSingleSelect = pending.questions.length === 1 && !pending.questions[0].multiSelect;
 
   let questionsHtml = "";
@@ -255,8 +260,9 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
     const qIndex = i;
 
     let optionsHtml = "";
+    const msgIdAttr = msgId ? ` data-msg-id="${escapeHtml(msgId)}"` : "";
     for (const opt of q.options) {
-      const dataAttrs = `data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-label="${escapeHtml(opt.label)}" data-index="${qIndex}"`;
+      const dataAttrs = `data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-label="${escapeHtml(opt.label)}" data-index="${qIndex}"${msgIdAttr}`;
       if (q.multiSelect) {
         optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="toggleQuestionOption(this)">
           <span class="question-option-label">${escapeHtml(opt.label)}</span>
@@ -273,7 +279,7 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
     // "Other" free-text input (always rendered per SDK spec)
     const otherHtml = `<div class="question-other">
       <input type="text" class="question-other-input" placeholder="Other..."
-        data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-index="${qIndex}"
+        data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-index="${qIndex}"${msgIdAttr}
         onkeydown="if(event.key==='Enter'){event.preventDefault();selectQuestionOther(this)}">
     </div>`;
 
@@ -285,10 +291,11 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
     </div>`;
   }
 
+  const msgIdJs = msgId ? `, '${escapeJs(msgId)}'` : "";
   const submitBtn = singleQuestionSingleSelect
     ? ""
     : `<div class="question-actions">
-        <button type="button" class="btn btn--question" onclick="submitQuestionAnswers('${escapeHtml(sessionId)}')">Submit</button>
+        <button type="button" class="btn btn--question" onclick="submitQuestionAnswers('${escapeJs(sessionId)}'${msgIdJs})">Submit</button>
       </div>`;
 
   return `<div class="question-prompt">
@@ -404,7 +411,7 @@ function renderQuestionMessage(msg: AgentMessage): string {
     resolve: () => {},
     timeoutId: 0 as any,
   };
-  const promptHtml = renderQuestionPrompt(pending as any, sid);
+  const promptHtml = renderQuestionPrompt(pending as any, sid, msg.id);
 
   return `<div class="message message--question" id="${msg.id}" data-id="${msg.id}">
     <div class="message-content">

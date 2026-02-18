@@ -32,10 +32,28 @@ function broadcast(event: string, data: string, sessionFilter?: string) {
 async function broadcastSidebar() {
   const sessions = agentManager.getSessions();
   const repos = agentManager.getLaunchableRepos();
-  const pendingCounts = await agentManager.getRepoPendingCounts();
+
+  // Phase 1: immediate broadcast with cached counts (no git operations)
+  const cached = agentManager.getCachedPendingCounts();
   for (const client of clients.values()) {
-    const html = renderSidebar(sessions, repos, client.sessionId ?? undefined, pendingCounts);
-    client.send("sidebar", html);
+    client.send("sidebar", renderSidebar(sessions, repos, client.sessionId ?? undefined, cached));
+  }
+
+  // Phase 2: refresh git counts and send a follow-up only if anything changed
+  const fresh = await agentManager.getRepoPendingCounts();
+  let changed = cached.size !== fresh.size;
+  if (!changed) {
+    for (const [k, v] of fresh) {
+      const c = cached.get(k);
+      if (!c || c.uncommitted !== v.uncommitted || c.unpulled !== v.unpulled || c.unpushed !== v.unpushed) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) return;
+  for (const client of clients.values()) {
+    client.send("sidebar", renderSidebar(sessions, repos, client.sessionId ?? undefined, fresh));
   }
 }
 

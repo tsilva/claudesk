@@ -109,6 +109,7 @@ export class AgentManager {
   private launchableRepos: LaunchableRepo[] = [];
   private lastBroadcast = new Map<string, number>();
   private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private cachedPendingCounts: Map<string, RepoGitStatus> = new Map();
 
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
@@ -504,6 +505,10 @@ export class AgentManager {
 
   getLaunchableRepos(): LaunchableRepo[] {
     return this.launchableRepos;
+  }
+
+  getCachedPendingCounts(): Map<string, RepoGitStatus> {
+    return this.cachedPendingCounts;
   }
 
   getSessionsNeedingAttention(): { sessionId: string; repoName: string; type: "permission" | "question" | "plan_approval" }[] {
@@ -985,6 +990,7 @@ export class AgentManager {
         }
       })
     );
+    this.cachedPendingCounts = counts;
     return counts;
   }
 }

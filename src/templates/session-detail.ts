@@ -2,8 +2,8 @@ import type { AgentSession, AgentMessage } from "../types.ts";
 import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, modeLabel, modeTooltip } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
-  // Find non-error result message to fold into last assistant message
-  const resultMsg = messages.find((msg) => msg.type === "result" && !msg.isError);
+  // Find the most recent non-error result message to fold into last assistant message
+  const resultMsg = messages.findLast((msg) => msg.type === "result" && !msg.isError);
   const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
 
   // Render initial messages, injecting footer into the last assistant message

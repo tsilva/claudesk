@@ -59,7 +59,7 @@ export function renderSidebar(
           <span class="session-card-slug">${escapeHtml(slug)}</span>
           <span class="session-card-tokens">${formatTokens(totalTokens)}</span>
           <span class="session-card-time"
-                data-last-activity="${session.lastActivity.toISOString()}"
+                data-last-activity="${((['streaming', 'starting'].includes(session.status)) && session.turnStartedAt ? session.turnStartedAt : session.lastActivity).toISOString()}"
                 data-status="${session.status}">${relativeTime(session.lastActivity)}</span>
           <button class="dismiss-btn" onclick="event.stopPropagation(); dismissSession('${session.id}')" title="Dismiss session">&times;</button>
         </div>

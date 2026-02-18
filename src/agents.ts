@@ -239,6 +239,7 @@ export class AgentManager {
     session.messages.push(userMsg);
     session.lastMessagePreview = text.slice(0, 80);
     session.lastActivity = new Date();
+    session.turnStartedAt = session.lastActivity;
     session.status = "streaming";
     this.persistSession(sessionId);
     this.onMessage(userMsg, session);
@@ -545,6 +546,17 @@ export class AgentManager {
 
         await this.handleSDKMessage(sessionId, s, msg);
       }
+
+      // Generator ended without a result message (SDK stream closed prematurely,
+      // e.g. due to setModel restarting the underlying query or a network drop).
+      // Ensure the session is not left stuck in streaming state.
+      const s = this.sessions.get(sessionId);
+      if (s && (s.status === "streaming" || s.status === "starting")) {
+        s.status = "idle";
+        s.turnStartedAt = undefined;
+        this.persistSession(sessionId, true);
+        this.onSessionChange(this.getSessions());
+      }
     } catch (err: unknown) {
       const s = this.sessions.get(sessionId);
       if (s && s.status !== "stopped") {
@@ -574,18 +586,8 @@ export class AgentManager {
           session.sdkSessionId = msg.session_id;
           session.status = "streaming";
           const initModel = (msg as any).model;
-          console.log(`[DEBUG init] session=${sessionId} requested_model=${session.model} init_model=${initModel}`);
-          // If SDK resolved a different model (e.g. from user settings), override it
-          if (initModel && initModel !== session.model) {
-            const q = this.queries.get(sessionId);
-            if (q) {
-              q.setModel(session.model).catch((err: unknown) =>
-                console.warn(`[model-override] setModel failed:`, err)
-              );
-            }
-          } else {
-            session.model = initModel ?? session.model;
-          }
+          // Accept whatever model the SDK resolved (may include version suffix)
+          session.model = initModel ?? session.model;
           this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());
         }
@@ -671,6 +673,7 @@ export class AgentManager {
 
       case "result": {
         session.lastActivity = new Date();
+        session.turnStartedAt = undefined;
 
         if (msg.subtype === "success") {
           session.status = "idle";

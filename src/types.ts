@@ -124,6 +124,7 @@ export interface AgentSession {
   status: AgentStatus;
   lastMessagePreview: string;
   lastActivity: Date;
+  turnStartedAt?: Date;
   createdAt: Date;
   gitBranch: string;
   totalCostUsd: number;

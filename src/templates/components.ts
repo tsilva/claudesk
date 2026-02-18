@@ -184,9 +184,10 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
 
 export function renderSessionHeaderStatus(session: AgentSession): string {
   const isActive = session.status === "streaming" || session.status === "starting";
+  const timerTs = (isActive && session.turnStartedAt ? session.turnStartedAt : session.lastActivity).toISOString();
   return `${statusBadge(session.status)}
     <span class="elapsed-timer"
-          data-last-activity="${session.lastActivity.toISOString()}"
+          data-last-activity="${timerTs}"
           data-status="${session.status}"></span>
     <span class="session-header-spacer"></span>
     <button class="btn btn--ghost" onclick="focusEditor('${session.id}')" title="Open in editor">Editor</button>

@@ -1,5 +1,6 @@
 # >>> MANAGED BY GITGUARD - DO NOT EDIT THIS SECTION <<<
 .claude/*.local.json
+.claude/*.local.json.bak
 .claude-sandbox.json
 .env
 .env.*

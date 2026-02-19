@@ -301,14 +301,17 @@
       var container = document.getElementById("conversation-stream");
       if (container) {
         container.scrollTop = 0;
-        // Track user scrolling on conversation stream
-        container.addEventListener("scroll", function() {
-          isUserScrolling = true;
-          if (scrollTimeout) clearTimeout(scrollTimeout);
-          scrollTimeout = setTimeout(function() {
-            isUserScrolling = false;
-          }, 2000);
-        }, { passive: true });
+        // Track user scrolling on conversation stream (only attach once)
+        if (!container.dataset.scrollTrackingAttached) {
+          container.dataset.scrollTrackingAttached = "true";
+          container.addEventListener("scroll", function() {
+            isUserScrolling = true;
+            if (scrollTimeout) clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(function() {
+              isUserScrolling = false;
+            }, 2000);
+          }, { passive: true });
+        }
       }
       // Focus message input when session loads
       var input = document.querySelector(".message-input");
@@ -703,7 +706,9 @@
     showTypingIndicator();
 
     var container = document.getElementById("conversation-stream");
-    if (container) container.scrollTop = 0;
+    if (container) {
+        container.scrollTop = 0;
+    }
 
     var body;
     var headers = {};
@@ -881,12 +886,17 @@
       if (!el) return;
       var questionTextEl = el.querySelector('.question-text');
       var firstQ = questionTextEl ? questionTextEl.textContent.trim() : 'Question';
+
+      // Build expanded content showing answers
+      var expandedContent = '';
+      for (var question in answers) {
+        if (answers[question]) {
+          expandedContent += '<div class="question-detail-block"><div class="question-detail-answer">' + escapeHtmlClient(answers[question]) + '</div></div>';
+        }
+      }
+
       el.className = 'message message--system';
-      el.innerHTML = '<div class="message-content question-resolved">' +
-        '<span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span>' +
-        '<span class="question-resolved-text">' + escapeHtmlClient(firstQ) + '</span>' +
-        '<span class="question-badge question-badge--answered">' + escapeHtmlClient(badgeText) + '</span>' +
-        '</div>';
+      el.innerHTML = '<div class="message-content"><details class="question-resolved-details"><summary class="question-resolved-summary"><span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span><span class="question-resolved-text">' + escapeHtmlClient(firstQ) + '</span><span class="question-badge question-badge--answered">' + escapeHtmlClient(badgeText) + '</span></summary>' + (expandedContent ? '<div class="question-resolved-content">' + expandedContent + '</div>' : '') + '</details></div>';
     });
 
     showTypingIndicator();
@@ -1104,14 +1114,16 @@
         removeTypingIndicator();
         removeFinishingIndicator();
       }
-      // Scroll to top after new content appended (column-reverse layout: newest at top)
-      // Only auto-scroll if user is not actively scrolling, or if it's a user message
-      var container = document.getElementById("conversation-stream");
-      if (container && (!isUserScrolling || isUserMessage)) {
-        requestAnimationFrame(function () {
+      // Store whether we should scroll after the swap completes
+      var shouldScroll = !isUserScrolling || isUserMessage;
+      var scrollAfterSwap = function() {
+        var container = document.getElementById("conversation-stream");
+        if (container && shouldScroll) {
           container.scrollTop = 0;
-        });
-      }
+        }
+      };
+      // Use setTimeout to ensure the DOM has been updated by HTMX
+      setTimeout(scrollAfterSwap, 10);
     }
   });
 

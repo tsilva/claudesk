@@ -70,12 +70,12 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 
 ## TIER 4: Lower Priority / Refactoring
 
-### 9. Unbounded Message Access
+### 9. Unbounded Message Access ✅
 - **File**: `src/agents.ts:650-654`
 - **Issue**: `getRecentMessages` loads entire history into memory
 - **Impact**: Memory issues with huge conversation histories
 - **Effort**: Add pagination or windowing
-- **Fix**: Implement message windowing or pagination
+- **Fix**: Implemented message windowing with `MESSAGE_WINDOW_LIMIT = 100` and `trimMessageWindow()` helper that preserves system messages and pending interactions while limiting memory usage
 
 ### 10. Git Status Cache Stale
 - **File**: `src/agents.ts:1131-1139`

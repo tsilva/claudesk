@@ -29,6 +29,7 @@ import { getReposDir } from "./config.ts";
 
 const ARCHIVED_MARKER = ".archived";
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const MESSAGE_WINDOW_LIMIT = 100; // Maximum messages to keep in memory per session
 
 // --- Git Helpers ---
 
@@ -95,6 +96,62 @@ function buildExitPlanPermissions(suggestions?: PermissionUpdate[]): PermissionU
   }
 
   return [...suggestions, setModeDefault];
+}
+
+// --- Message Windowing Helper ---
+
+/**
+ * Trims message history to MESSAGE_WINDOW_LIMIT while preserving:
+ * - System messages (critical for context)
+ * - Messages with pending permissions/questions/plan approvals
+ * - The most recent messages
+ */
+function trimMessageWindow(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length <= MESSAGE_WINDOW_LIMIT) {
+    return messages;
+  }
+
+  // Identify indices of messages that must be preserved
+  const preserveIndices = new Set<number>();
+  
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    // Preserve system messages
+    if (msg.type === "system") {
+      preserveIndices.add(i);
+    }
+    // Preserve messages with unresolved pending states
+    if (msg.permissionData && !msg.permissionData.resolved) {
+      preserveIndices.add(i);
+    }
+    if (msg.questionData && !msg.questionData.resolved) {
+      preserveIndices.add(i);
+    }
+    if (msg.planApprovalData && !msg.planApprovalData.resolved) {
+      preserveIndices.add(i);
+    }
+  }
+
+  // Always preserve the most recent messages up to the limit
+  const numToPreserve = Math.min(MESSAGE_WINDOW_LIMIT, messages.length);
+  const startIndex = messages.length - numToPreserve;
+  
+  for (let i = startIndex; i < messages.length; i++) {
+    preserveIndices.add(i);
+  }
+
+  // Build the trimmed array preserving order
+  const trimmed: AgentMessage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (preserveIndices.has(i) || i >= startIndex) {
+      const msg = messages[i];
+      if (msg) {
+        trimmed.push(msg);
+      }
+    }
+  }
+
+  return trimmed;
 }
 
 // --- AgentManager ---
@@ -270,6 +327,7 @@ export class AgentManager {
       attachments: userAttachments,
     };
     session.messages.push(userMsg);
+    session.messages = trimMessageWindow(session.messages);
     session.lastMessagePreview = text.slice(0, 80);
     session.lastActivity = new Date();
     session.turnStartedAt = session.lastActivity;
@@ -848,6 +906,7 @@ export class AgentManager {
         };
 
         session.messages.push(agentMsg);
+        session.messages = trimMessageWindow(session.messages);
         this.persistSession(sessionId);
         this.onMessage(agentMsg, session);
         this.onSessionChange(this.getSessions());
@@ -884,6 +943,7 @@ export class AgentManager {
             isError: false,
           };
           session.messages.push(agentMsg);
+          session.messages = trimMessageWindow(session.messages);
           this.persistSession(sessionId, true);
           this.onMessage(agentMsg, session);
         } else {
@@ -896,6 +956,7 @@ export class AgentManager {
             isError: true,
           };
           session.messages.push(agentMsg);
+          session.messages = trimMessageWindow(session.messages);
           this.persistSession(sessionId, true);
           this.onMessage(agentMsg, session);
         }
@@ -989,6 +1050,7 @@ export class AgentManager {
         permissionData: { toolName, toolInput: input, toolUseId },
       };
       session.messages.push(permMsg);
+      session.messages = trimMessageWindow(session.messages);
       this.onMessage(permMsg, session);
     });
   }
@@ -1061,6 +1123,7 @@ export class AgentManager {
         questionData: { questions, originalInput: input },
       };
       session.messages.push(qMsg);
+      session.messages = trimMessageWindow(session.messages);
       this.onMessage(qMsg, session);
     });
   }
@@ -1131,6 +1194,7 @@ export class AgentManager {
         planApprovalData: { allowedPrompts, toolUseId, planContent },
       };
       session.messages.push(planMsg);
+      session.messages = trimMessageWindow(session.messages);
       this.onMessage(planMsg, session);
     });
   }

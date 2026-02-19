@@ -28,7 +28,7 @@ import {
   loadAllSessions,
   deleteSessionFile,
 } from "./persistence.ts";
-import { getReposDir } from "./config.ts";
+import { getReposDir, isRepoBlacklisted } from "./config.ts";
 
 // --- Constants ---
 
@@ -99,7 +99,7 @@ function fireCallback(cb: () => void | Promise<void>, label: string): void {
 function buildExitPlanPermissions(suggestions?: PermissionUpdate[]): PermissionUpdate[] {
   const setModeDefault: PermissionUpdate = {
     type: 'setMode',
-    mode: 'default',
+    mode: 'acceptEdits',
     destination: 'session',
   };
 
@@ -586,7 +586,7 @@ export class AgentManager {
     session.pendingPlanApproval = null;
 
     if (accept) {
-      session.permissionMode = "default";
+      session.permissionMode = "acceptEdits";
       if (session.preset === 'opus-plan') {
         session.model = 'claude-sonnet-4-6';
         const q = this.queries.get(sessionId);
@@ -610,7 +610,7 @@ export class AgentManager {
       // Set permission mode BEFORE resolving so the SDK processes the next tool with the correct mode
       const q = this.queries.get(sessionId);
       if (q && typeof q.setPermissionMode === "function") {
-        await q.setPermissionMode("default").catch((err: unknown) =>
+        await q.setPermissionMode("acceptEdits").catch((err: unknown) =>
           console.warn(`[plan-approval] setPermissionMode failed:`, err)
         );
       }
@@ -1286,6 +1286,7 @@ export class AgentManager {
         if (!entry.isDirectory()) continue;
         const repoPath = join(reposDir, entry.name);
         if (activeCwds.has(repoPath)) continue;
+        if (await isRepoBlacklisted(entry.name)) continue;
         try {
           await stat(join(repoPath, ".git"));
         } catch {

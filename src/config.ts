@@ -8,6 +8,7 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 interface ClaudeskConfig {
   repos: string;
+  repoBlacklistPatterns?: string[];
 }
 
 async function readConfig(): Promise<ClaudeskConfig | null> {
@@ -86,4 +87,24 @@ export async function getReposDir(): Promise<string> {
 export async function runSetup(): Promise<void> {
   cachedReposDir = null;
   await setupConfig();
+}
+
+let cachedBlacklistPatterns: string[] | null = null;
+
+export async function isRepoBlacklisted(repoName: string): Promise<boolean> {
+  if (cachedBlacklistPatterns === null) {
+    const config = await readConfig();
+    cachedBlacklistPatterns = config?.repoBlacklistPatterns ?? [];
+  }
+
+  for (const pattern of cachedBlacklistPatterns) {
+    if (pattern.includes('*')) {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      if (regex.test(repoName)) return true;
+    } else if (repoName === pattern) {
+      return true;
+    }
+  }
+
+  return false;
 }

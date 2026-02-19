@@ -460,13 +460,20 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
       ? `: ${pd.reviseFeedback}`
       : "";
 
-    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}">
-      <div class="message-content plan-approval-resolved">
-        <span class="plan-approval-icon-sm">P</span>
-        <span class="plan-approval-resolved-text">Plan Review</span>
-        <span class="plan-badge ${badgeClass}">${escapeHtml(label + feedback)}</span>
-      </div>
-    </div>`;
+    // Build expanded content showing the plan without input buttons
+    let expandedContent = "";
+    if (pd.planContent) {
+      expandedContent += `<div class="plan-resolved-body markdown-body">${renderMarkdown(pd.planContent)}</div>`;
+    }
+    if (pd.allowedPrompts.length > 0) {
+      expandedContent += `<div class="plan-resolved-section-label">Requested permissions:</div><div class="plan-prompts-list">`;
+      for (const p of pd.allowedPrompts) {
+        expandedContent += `<div class="plan-prompt-item">${escapeHtml(p.prompt)}</div>`;
+      }
+      expandedContent += `</div>`;
+    }
+
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}"><div class="message-content"><details class="plan-resolved-details"><summary class="plan-resolved-summary"><span class="plan-approval-icon-sm">P</span><span class="plan-resolved-text">Plan Review</span><span class="plan-badge ${badgeClass}">${escapeHtml(label + feedback)}</span></summary>${expandedContent ? `<div class="plan-resolved-content">${expandedContent}</div>` : ""}</details></div></div>`;
   }
 
   // Pending: full plan approval prompt inline

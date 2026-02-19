@@ -43,7 +43,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 
 ## TIER 3: Medium Impact, Medium Effort
 
-### 6. Permission Resolution Race Condition
+### 6. Permission Resolution Race Condition ✅
 - **File**: `src/agents.ts:402-405`
 - **Issue**: Status transition check after `delete()` vulnerable to parallel resolution race conditions
 - **Impact**: Session can get stuck in "needs_input" state

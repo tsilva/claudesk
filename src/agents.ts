@@ -388,6 +388,11 @@ export class AgentManager {
     }
     if (!pending) return;
 
+    // Race condition guard: check if already processed before doing anything
+    if (!session.pendingPermissions.has(pending.toolUseId)) {
+      return; // Already resolved by another concurrent call
+    }
+
     clearTimeout(pending.timeoutId);
 
     // Update the inline permission message to show resolved state
@@ -417,6 +422,12 @@ export class AgentManager {
     if (!session?.pendingQuestion) return;
 
     const pending = session.pendingQuestion;
+
+    // Race condition guard: check if already processed before doing anything
+    if (session.pendingQuestion !== pending) {
+      return; // Already resolved by another concurrent call
+    }
+
     clearTimeout(pending.timeoutId);
 
     // Update the inline question message to show answered state
@@ -446,6 +457,12 @@ export class AgentManager {
     if (!session?.pendingPlanApproval) return;
 
     const pending = session.pendingPlanApproval;
+
+    // Race condition guard: check if already processed before doing anything
+    if (session.pendingPlanApproval !== pending) {
+      return; // Already resolved by another concurrent call
+    }
+
     clearTimeout(pending.timeoutId);
 
     // Update the inline plan approval message to show resolved state

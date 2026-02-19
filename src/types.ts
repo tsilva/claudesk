@@ -64,6 +64,7 @@ export interface AgentMessage {
     originalInput: Record<string, unknown>;
     resolved?: "answered" | "timed_out";
     answerSummary?: string;
+    answers?: Record<string, string>;
   };
   planApprovalData?: {
     allowedPrompts: { tool: "Bash"; prompt: string }[];
@@ -231,6 +232,7 @@ export interface PersistedMessage {
     originalInput: Record<string, unknown>;
     resolved?: "answered" | "timed_out";
     answerSummary?: string;
+    answers?: Record<string, string>;
   };
   planApprovalData?: {
     allowedPrompts: { tool: "Bash"; prompt: string }[];

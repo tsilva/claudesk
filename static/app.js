@@ -7,6 +7,8 @@
   let currentSessionId = null;
   var pendingAnswers = {}; // { questionText: selectedLabel(s) }
   var seenNotifications = new Set(); // tracks "event:sessionId" keys to suppress replayed notifications
+  var isUserScrolling = false;
+  var scrollTimeout = null;
 
 
   // --- Notifications ---
@@ -298,7 +300,15 @@
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");
       if (container) {
-        container.scrollTop = container.scrollHeight;
+        container.scrollTop = 0;
+        // Track user scrolling on conversation stream
+        container.addEventListener("scroll", function() {
+          isUserScrolling = true;
+          if (scrollTimeout) clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(function() {
+            isUserScrolling = false;
+          }, 2000);
+        }, { passive: true });
       }
       // Focus message input when session loads
       var input = document.querySelector(".message-input");
@@ -693,7 +703,7 @@
     showTypingIndicator();
 
     var container = document.getElementById("conversation-stream");
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = 0;
 
     var body;
     var headers = {};
@@ -1016,7 +1026,7 @@
     msg.id = "optimistic-user-msg";
     msg.innerHTML = '<div class="message-content">' + escapeHtmlClient(text) + '</div>';
     container.appendChild(msg);
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = 0;
   }
 
   // --- Finishing Indicator (shown while stop hooks run after model reply) ---
@@ -1034,7 +1044,7 @@
       '<span class="finishing-indicator-dot"></span>' +
       '<span class="finishing-indicator-dot"></span>';
     container.appendChild(indicator);
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = 0;
   }
 
   function removeFinishingIndicator() {
@@ -1069,7 +1079,7 @@
       '<div class="typing-indicator-dot"></div>' +
       '<div class="typing-indicator-dot"></div>';
     container.appendChild(indicator);
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = 0;
   }
 
   function removeTypingIndicator() {
@@ -1078,7 +1088,7 @@
   }
 
   // Remove typing indicator when first agent response arrives (skip user messages)
-  // Also scroll to bottom when new content arrives
+  // Also scroll to top when new content arrives (unless user is actively scrolling)
   document.body.addEventListener("htmx:sseMessage", function (e) {
     if (e.detail.type === "stream-append") {
       // Remove empty conversation hint when first message arrives
@@ -1089,15 +1099,17 @@
       var temp = document.createElement("div");
       temp.innerHTML = data;
       var root = temp.firstElementChild;
-      if (!root || !root.classList.contains("message--user")) {
+      var isUserMessage = root && root.classList.contains("message--user");
+      if (!isUserMessage) {
         removeTypingIndicator();
         removeFinishingIndicator();
       }
-      // Scroll to bottom after new content appended (column-reverse layout: newest at bottom)
+      // Scroll to top after new content appended (column-reverse layout: newest at top)
+      // Only auto-scroll if user is not actively scrolling, or if it's a user message
       var container = document.getElementById("conversation-stream");
-      if (container) {
+      if (container && (!isUserScrolling || isUserMessage)) {
         requestAnimationFrame(function () {
-          container.scrollTop = container.scrollHeight;
+          container.scrollTop = 0;
         });
       }
     }
@@ -1123,10 +1135,13 @@
     }
     removeTypingIndicator();
     removeFinishingIndicator();
-    // Scroll to bottom after footer injected (column-reverse layout: newest at bottom)
-    requestAnimationFrame(function () {
-      container.scrollTop = container.scrollHeight;
-    });
+    // Scroll to top after footer injected (column-reverse layout: newest at top)
+    // Only auto-scroll if user is not actively scrolling
+    if (!isUserScrolling) {
+      requestAnimationFrame(function () {
+        container.scrollTop = 0;
+      });
+    }
   });
 
   // --- Elapsed Timer ---

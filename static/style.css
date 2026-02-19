@@ -1393,6 +1393,45 @@ ul, ol {
   min-width: 0;
 }
 
+/* Expandable resolved question details */
+.question-resolved-details {
+  width: 100%;
+}
+
+.question-resolved-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.question-resolved-summary::-webkit-details-marker {
+  display: none;
+}
+
+.question-resolved-content {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.question-detail-block {
+  margin-bottom: 4px;
+}
+
+.question-detail-block:last-child {
+  margin-bottom: 0;
+}
+
+.question-detail-answer {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
 /* --------------------------------------------------------------------------
    Logo & Header elements
    -------------------------------------------------------------------------- */

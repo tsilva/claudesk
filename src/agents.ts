@@ -500,6 +500,7 @@ export class AgentManager {
     if (qMsg?.questionData) {
       qMsg.questionData.resolved = "answered";
       qMsg.questionData.answerSummary = answerText || "Answered";
+      qMsg.questionData.answers = answers;
       this.onMessage(qMsg, session);
     }
 

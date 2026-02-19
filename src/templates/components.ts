@@ -398,17 +398,33 @@ function renderQuestionMessage(msg: AgentMessage): string {
   const sid = msg.sessionId ?? "";
 
   if (qd.resolved) {
-    // Compact resolved badge
     const label = qd.resolved === "answered" ? "Answered" : "Timed Out";
     const badgeClass = qd.resolved === "answered" ? "question-badge--answered" : "question-badge--timeout";
     const summary = qd.answerSummary ? `: ${qd.answerSummary}` : "";
     const firstQ = qd.questions[0]?.question ?? "Question";
 
+    // Build expanded content showing answers sent to agent
+    let expandedContent = "";
+    if (qd.resolved === "answered" && qd.answers && Object.keys(qd.answers).length > 0) {
+      for (const [question, answer] of Object.entries(qd.answers)) {
+        if (answer) {
+          expandedContent += `<div class="question-detail-block">
+            <div class="question-detail-answer">${escapeHtml(answer)}</div>
+          </div>`;
+        }
+      }
+    }
+
     return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}">
-      <div class="message-content question-resolved">
-        <span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span>
-        <span class="question-resolved-text">${escapeHtml(firstQ)}</span>
-        <span class="question-badge ${badgeClass}">${escapeHtml(label + summary)}</span>
+      <div class="message-content">
+        <details class="question-resolved-details">
+          <summary class="question-resolved-summary">
+            <span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span>
+            <span class="question-resolved-text">${escapeHtml(firstQ)}</span>
+            <span class="question-badge ${badgeClass}">${escapeHtml(label + summary)}</span>
+          </summary>
+          ${expandedContent ? `<div class="question-resolved-content">${expandedContent}</div>` : ""}
+        </details>
       </div>
     </div>`;
   }

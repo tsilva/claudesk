@@ -50,7 +50,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: Add synchronization
 - **Fix**: Use mutex or queue for permission handling, or atomic check-and-set
 
-### 7. SSE Client Memory Leak
+### 7. SSE Client Memory Leak ✅
 - **File**: `src/server.ts:22-30`
 - **Issue**: No heartbeat/timeout mechanism to clean up dead SSE connections
 - **Impact**: Long-running server accumulates dead connections

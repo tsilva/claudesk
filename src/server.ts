@@ -15,12 +15,26 @@ const PORT = parseInt(process.env.CLAUDESK_PORT || process.env.PORT || "3456", 1
 interface SSEClient {
   id: string;
   sessionId: string | null;
+  lastActivity: number;
   send: (event: string, data: string) => void;
   close: () => void;
 }
 
 const clients = new Map<string, SSEClient>();
 let clientIdCounter = 0;
+
+// Cleanup stale SSE clients every 30s
+const STALE_THRESHOLD = 60000; // 60 seconds
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, client] of clients) {
+    if (now - client.lastActivity > STALE_THRESHOLD) {
+      console.log(`[sse-cleanup] Removing stale client ${id}`);
+      client.close();
+      clients.delete(id);
+    }
+  }
+}, 30000);
 
 function broadcast(event: string, data: string, sessionFilter?: string) {
   for (const client of clients.values()) {
@@ -197,8 +211,11 @@ app.get("/events", (c) => {
     const client: SSEClient = {
       id: clientId,
       sessionId,
+      lastActivity: Date.now(),
       send: (event, data) => {
-        stream.writeSSE({ event, data }).catch(() => {
+        stream.writeSSE({ event, data }).then(() => {
+          client.lastActivity = Date.now();
+        }).catch(() => {
           removeClient();
         });
       },

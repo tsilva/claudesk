@@ -857,64 +857,67 @@ export function renderRawConversation(session: AgentSession, messages: AgentMess
     
     switch (msg.type) {
       case "user": {
-        lines.push(`=== USER [${timestamp}] ===`);
-        if (msg.userText || msg.text) {
-          lines.push(msg.userText || msg.text || "");
-        }
-        if (msg.attachments && msg.attachments.length > 0) {
-          lines.push("");
-          lines.push("--- ATTACHMENTS ---");
-          for (const att of msg.attachments) {
-            lines.push(`  - ${att.name} (${att.type}, ${att.size} bytes)`);
-          }
+        lines.push(`=== USER REQUEST [${timestamp}] ===`);
+        if (msg.rawRequest) {
+          lines.push(JSON.stringify(msg.rawRequest, null, 2));
+        } else {
+          // Fallback for older messages without raw data
+          lines.push(JSON.stringify({
+            role: "user",
+            content: msg.text || ""
+          }, null, 2));
         }
         lines.push("");
         break;
       }
       
       case "assistant": {
-        lines.push(`=== ASSISTANT [${timestamp}] ===`);
-        if (msg.contentBlocks && msg.contentBlocks.length > 0) {
-          for (const block of msg.contentBlocks) {
-            switch (block.type) {
-              case "text":
-                if (block.text?.trim()) {
-                  lines.push("[TEXT]");
-                  lines.push(block.text);
-                  lines.push("");
-                }
-                break;
-              case "thinking":
-                if (block.text?.trim()) {
-                  lines.push("[THINKING]");
-                  lines.push(block.text);
-                  lines.push("");
-                }
-                break;
-              case "tool_use":
-                lines.push(`[TOOL_USE: ${block.toolName || "unknown"}]`);
-                lines.push(`toolUseId: ${block.toolUseId || "none"}`);
-                lines.push("input:");
-                lines.push(JSON.stringify(block.toolInput, null, 2));
-                lines.push("");
-                break;
-              case "tool_result":
-                lines.push(`[TOOL_RESULT: ${block.toolName || "unknown"}]`);
-                lines.push(`toolUseId: ${block.toolUseId || "none"}`);
-                lines.push(`isError: ${block.isError || false}`);
-                lines.push("content:");
-                lines.push(block.content || "");
-                lines.push("");
-                break;
-              case "image":
-                lines.push("[IMAGE]");
-                lines.push(`media_type: ${block.source?.media_type || "unknown"}`);
-                lines.push(`data: <base64 ${block.source?.data?.length || 0} chars>`);
-                lines.push("");
-                break;
+        lines.push(`=== ASSISTANT RESPONSE [${timestamp}] ===`);
+        if (msg.rawResponse) {
+          lines.push(JSON.stringify(msg.rawResponse, null, 2));
+        } else {
+          // Fallback for older messages without raw data
+          const fallbackResponse: Record<string, unknown> = {
+            role: "assistant",
+            content: []
+          };
+          if (msg.contentBlocks) {
+            for (const block of msg.contentBlocks) {
+              switch (block.type) {
+                case "text":
+                  (fallbackResponse.content as Array<Record<string, unknown>>).push({
+                    type: "text",
+                    text: block.text
+                  });
+                  break;
+                case "thinking":
+                  (fallbackResponse.content as Array<Record<string, unknown>>).push({
+                    type: "thinking",
+                    thinking: block.text
+                  });
+                  break;
+                case "tool_use":
+                  (fallbackResponse.content as Array<Record<string, unknown>>).push({
+                    type: "tool_use",
+                    id: block.toolUseId,
+                    name: block.toolName,
+                    input: block.toolInput
+                  });
+                  break;
+                case "tool_result":
+                  (fallbackResponse.content as Array<Record<string, unknown>>).push({
+                    type: "tool_result",
+                    tool_use_id: block.toolUseId,
+                    content: block.content,
+                    is_error: block.isError
+                  });
+                  break;
+              }
             }
           }
+          lines.push(JSON.stringify(fallbackResponse, null, 2));
         }
+        lines.push("");
         break;
       }
       
@@ -928,15 +931,16 @@ export function renderRawConversation(session: AgentSession, messages: AgentMess
       }
       
       case "result": {
-        lines.push(`=== RESULT [${timestamp}] ===`);
-        if (msg.isError) {
-          lines.push("ERROR");
-        }
-        lines.push(`Duration: ${msg.durationMs || 0}ms`);
-        lines.push(`Cost: $${msg.costUsd || 0}`);
-        lines.push(`Input tokens: ${msg.inputTokens || 0}`);
-        lines.push(`Output tokens: ${msg.outputTokens || 0}`);
-        lines.push(`Turns: ${msg.numTurns || 0}`);
+        lines.push(`=== TURN RESULT [${timestamp}] ===`);
+        lines.push(JSON.stringify({
+          duration_ms: msg.durationMs,
+          total_cost_usd: msg.costUsd,
+          input_tokens: msg.inputTokens,
+          output_tokens: msg.outputTokens,
+          num_turns: msg.numTurns,
+          is_error: msg.isError,
+          result: msg.text
+        }, null, 2));
         lines.push("");
         break;
       }
@@ -944,41 +948,36 @@ export function renderRawConversation(session: AgentSession, messages: AgentMess
 
     // Permission data
     if (msg.permissionData) {
-      lines.push(`=== PERMISSION [${timestamp}] ===`);
-      lines.push(`Tool: ${msg.permissionData.toolName}`);
-      lines.push(`toolUseId: ${msg.permissionData.toolUseId}`);
-      lines.push(`Status: ${msg.permissionData.resolved || "pending"}`);
-      lines.push("Input:");
-      lines.push(JSON.stringify(msg.permissionData.toolInput, null, 2));
+      lines.push(`=== PERMISSION REQUEST [${timestamp}] ===`);
+      lines.push(JSON.stringify({
+        tool: msg.permissionData.toolName,
+        tool_use_id: msg.permissionData.toolUseId,
+        input: msg.permissionData.toolInput,
+        resolved: msg.permissionData.resolved
+      }, null, 2));
       lines.push("");
     }
 
     // Question data
     if (msg.questionData) {
       lines.push(`=== QUESTION [${timestamp}] ===`);
-      lines.push(`Status: ${msg.questionData.resolved || "pending"}`);
-      if (msg.questionData.answers) {
-        lines.push("Answers:");
-        for (const [questionText, answerText] of Object.entries(msg.questionData.answers)) {
-          lines.push(`  ${questionText}: ${answerText}`);
-        }
-      }
+      lines.push(JSON.stringify({
+        questions: msg.questionData.questions,
+        answers: msg.questionData.answers,
+        resolved: msg.questionData.resolved
+      }, null, 2));
       lines.push("");
     }
 
     // Plan approval data
     if (msg.planApprovalData) {
-      lines.push(`=== PLAN_APPROVAL [${timestamp}] ===`);
-      lines.push(`Status: ${msg.planApprovalData.resolved || "pending"}`);
-      if (msg.planApprovalData.reviseFeedback) {
-        lines.push(`Feedback: ${msg.planApprovalData.reviseFeedback}`);
-      }
-      if (msg.planApprovalData.allowedPrompts.length > 0) {
-        lines.push("Allowed prompts:");
-        for (const p of msg.planApprovalData.allowedPrompts) {
-          lines.push(`  - ${p.tool}: ${p.prompt}`);
-        }
-      }
+      lines.push(`=== PLAN APPROVAL [${timestamp}] ===`);
+      lines.push(JSON.stringify({
+        allowed_prompts: msg.planApprovalData.allowedPrompts,
+        plan_content: msg.planApprovalData.planContent,
+        resolved: msg.planApprovalData.resolved,
+        revise_feedback: msg.planApprovalData.reviseFeedback
+      }, null, 2));
       lines.push("");
     }
   }

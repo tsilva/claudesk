@@ -294,6 +294,11 @@ export class AgentManager {
     const abortController = new AbortController();
     this.abortControllers.set(sessionId, abortController);
 
+    // Check for visual content early
+    const hasVisualContent = attachments && attachments.some(a => 
+      a.type.startsWith("image/") || a.type === "application/pdf"
+    );
+
     // Convert attachments to SDK format
     const userAttachments: import("./types.ts").Attachment[] = [];
     const contentBlocks: import("./types.ts").ContentBlock[] = [];
@@ -322,6 +327,25 @@ export class AgentManager {
       }
     }
 
+    // Build raw request for raw mode
+    const rawRequest = hasVisualContent ? {
+      role: "user",
+      content: [
+        ...(text?.trim() ? [{ type: "text", text }] : []),
+        ...(attachments?.filter(a => a.type.startsWith("image/")).map(a => ({
+          type: "image",
+          source: { type: "base64" as const, media_type: a.type, data: a.data }
+        })) || []),
+        ...(attachments?.filter(a => a.type === "application/pdf").map(a => ({
+          type: "document",
+          source: { type: "base64" as const, media_type: "application/pdf", data: a.data }
+        })) || []),
+      ]
+    } : {
+      role: "user",
+      content: text || ""
+    };
+
     // Add user message
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
@@ -330,6 +354,7 @@ export class AgentManager {
       userText: text,
       text,
       attachments: userAttachments,
+      rawRequest,
     };
     session.messages.push(userMsg);
     session.messages = trimMessageWindow(session.messages);
@@ -370,9 +395,6 @@ export class AgentManager {
 
     // Build prompt - use streaming input for images/documents, string for text-only
     let prompt;
-    const hasVisualContent = attachments && attachments.some(a => 
-      a.type.startsWith("image/") || a.type === "application/pdf"
-    );
     
     if (hasVisualContent) {
       // Use streaming input mode for multimodal messages (images + PDFs)
@@ -906,6 +928,17 @@ export class AgentManager {
           session.status = "idle";
         }
 
+        // Store raw response for raw mode
+        const rawResponse = {
+          id: msg.uuid,
+          type: "message",
+          role: "assistant",
+          content: betaMsg.content,
+          model: session.model,
+          stop_reason: betaMsg.stop_reason,
+          usage: betaMsg.usage,
+        };
+
         const agentMsg: AgentMessage = {
           id: msg.uuid ?? crypto.randomUUID(),
           type: "assistant",
@@ -914,6 +947,7 @@ export class AgentManager {
           text: text.trim(),
           inputTokens: usage?.input_tokens,
           outputTokens: usage?.output_tokens,
+          rawResponse,
         };
 
         session.messages.push(agentMsg);

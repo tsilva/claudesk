@@ -74,6 +74,9 @@ export interface AgentMessage {
     reviseFeedback?: string;
   };
   attachments?: Attachment[];
+  // Raw SDK message data for truly raw mode
+  rawRequest?: unknown;
+  rawResponse?: unknown;
 }
 
 // --- Permission & Question handling ---
@@ -242,6 +245,8 @@ export interface PersistedMessage {
     reviseFeedback?: string;
   };
   attachments?: Attachment[];
+  rawRequest?: unknown;
+  rawResponse?: unknown;
 }
 
 export interface PersistedSession {

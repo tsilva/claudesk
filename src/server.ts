@@ -468,9 +468,9 @@ app.post("/api/agents/:id/permission", async (c) => {
 app.post("/api/agents/:id/answer", async (c) => {
   try {
     const id = c.req.param("id");
-    const body = await c.req.json<{ answers: Record<string, string> }>();
+    const body = await c.req.json<{ toolUseId: string; answers: Record<string, string> }>();
 
-    agentManager.answerQuestion(id, body.answers);
+    agentManager.answerQuestion(id, body.toolUseId, body.answers);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);

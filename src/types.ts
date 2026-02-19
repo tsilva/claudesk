@@ -153,7 +153,7 @@ export interface AgentSession {
   preset?: ModelPreset;
   permissionMode: PermissionMode;
   hooksRunning?: boolean;
-  pendingQuestion: PendingQuestion | null;
+  pendingQuestions: PendingQuestion[];
   pendingPlanApproval: PendingPlanApproval | null;
   pendingPermissions: Map<string, PendingPermission>;
   messages: AgentMessage[];

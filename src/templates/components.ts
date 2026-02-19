@@ -84,7 +84,6 @@ export function relativeTime(date: Date): string {
 }
 
 export function formatTokens(tokens: number): string {
-  if (tokens === 0) return "";
   if (tokens < 1000) return `${tokens} tok`;
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k tok`;
   return `${(tokens / 1_000_000).toFixed(1)}M tok`;
@@ -572,6 +571,23 @@ function renderContentBlock(block: ContentBlock): string {
         ? rawJson.slice(0, 500) + "\n..."
         : rawJson;
       const preview = getToolPreview(name, block.toolInput as Record<string, any>);
+
+      // Special handling for AskUserQuestion to show question preview inline
+      if (name === "AskUserQuestion" && block.toolInput) {
+        const input = block.toolInput as Record<string, any>;
+        const questions = Array.isArray(input.questions) ? input.questions : [];
+        const firstQuestion = questions[0]?.question ?? "";
+        const questionPreview = firstQuestion ? truncatePreview(firstQuestion) : "";
+
+        return `<details class="tool-block">
+          <summary class="tool-summary">
+            <span class="tool-icon">$</span>
+            <span class="tool-name">${escapeHtml(name)}</span>
+            ${questionPreview ? `<span class="tool-preview">${escapeHtml(questionPreview)}</span>` : ""}
+          </summary>
+          ${displayInput ? `<pre class="tool-input">${escapeHtml(displayInput)}</pre>` : ""}
+        </details>`;
+      }
 
       return `<details class="tool-block">
         <summary class="tool-summary">

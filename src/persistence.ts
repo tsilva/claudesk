@@ -98,7 +98,7 @@ export function deserializeSession(data: PersistedSession): AgentSession {
     preset: data.preset,
     permissionMode: data.permissionMode,
     pendingPermissions: new Map(),
-    pendingQuestion: null,
+    pendingQuestions: [],
     pendingPlanApproval: null,
     messages: data.messages.map(deserializeMessage),
   };

@@ -248,7 +248,7 @@ export class AgentManager {
       model: sessionModel,
       preset,
       permissionMode: permissionMode || "plan",
-      pendingQuestion: null,
+      pendingQuestions: [],
       pendingPlanApproval: null,
       pendingPermissions: new Map(),
       messages: [],
@@ -470,7 +470,7 @@ export class AgentManager {
     session.pendingPermissions.delete(pending.toolUseId);
 
     // Only transition to streaming if no more pending permissions/questions/plan approvals
-    if (session.pendingPermissions.size === 0 && !session.pendingQuestion && !session.pendingPlanApproval) {
+    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
       session.status = "streaming";
     }
     this.onSessionChange(this.getSessions());
@@ -482,16 +482,15 @@ export class AgentManager {
     }
   }
 
-  answerQuestion(sessionId: string, answers: Record<string, string>): void {
+  answerQuestion(sessionId: string, toolUseId: string, answers: Record<string, string>): void {
     const session = this.sessions.get(sessionId);
-    if (!session?.pendingQuestion) return;
+    if (!session) return;
 
-    const pending = session.pendingQuestion;
+    // Find the specific pending question by toolUseId
+    const pendingIndex = session.pendingQuestions.findIndex(q => q.toolUseId === toolUseId);
+    if (pendingIndex === -1) return;
 
-    // Race condition guard: check if already processed before doing anything
-    if (session.pendingQuestion !== pending) {
-      return; // Already resolved by another concurrent call
-    }
+    const pending = session.pendingQuestions[pendingIndex]!;
 
     clearTimeout(pending.timeoutId);
 
@@ -504,9 +503,11 @@ export class AgentManager {
       this.onMessage(qMsg, session);
     }
 
-    session.pendingQuestion = null;
-    // Only transition to streaming if no more pending permissions/plan approvals
-    if (session.pendingPermissions.size === 0 && !session.pendingPlanApproval) {
+    // Remove this question from the pending array
+    session.pendingQuestions.splice(pendingIndex, 1);
+    
+    // Only transition to streaming if no more pending permissions/questions/plan approvals
+    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
       session.status = "streaming";
     }
     this.onSessionChange(this.getSessions());
@@ -557,7 +558,7 @@ export class AgentManager {
 
     // Only transition to streaming if no more pending permissions/questions
     // This happens AFTER async operations complete to avoid status race
-    if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
+    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0) {
       session.status = "streaming";
     }
 
@@ -602,11 +603,11 @@ export class AgentManager {
       perm.resolve({ behavior: "deny", message: "Agent stopped" });
     }
     session.pendingPermissions.clear();
-    if (session.pendingQuestion) {
-      clearTimeout(session.pendingQuestion.timeoutId);
-      session.pendingQuestion.resolve({ behavior: "deny", message: "Agent stopped" });
-      session.pendingQuestion = null;
+    for (const q of session.pendingQuestions) {
+      clearTimeout(q.timeoutId);
+      q.resolve({ behavior: "deny", message: "Agent stopped" });
     }
+    session.pendingQuestions = [];
     if (session.pendingPlanApproval) {
       clearTimeout(session.pendingPlanApproval.timeoutId);
       session.pendingPlanApproval.resolve({ behavior: "deny", message: "Agent stopped" });
@@ -658,10 +659,11 @@ export class AgentManager {
       perm.resolve({ behavior: "deny", message: "Session dismissed" });
     }
     session.pendingPermissions.clear();
-    if (session.pendingQuestion) {
-      clearTimeout(session.pendingQuestion.timeoutId);
-      session.pendingQuestion.resolve({ behavior: "deny", message: "Session dismissed" });
+    for (const q of session.pendingQuestions) {
+      clearTimeout(q.timeoutId);
+      q.resolve({ behavior: "deny", message: "Session dismissed" });
     }
+    session.pendingQuestions = [];
     if (session.pendingPlanApproval) {
       clearTimeout(session.pendingPlanApproval.timeoutId);
       session.pendingPlanApproval.resolve({ behavior: "deny", message: "Session dismissed" });
@@ -716,7 +718,7 @@ export class AgentManager {
         result.push({ sessionId: session.id, repoName: session.repoName, type: "plan_approval", logoUrl });
       } else if (session.pendingPermissions.size > 0) {
         result.push({ sessionId: session.id, repoName: session.repoName, type: "permission", logoUrl });
-      } else if (session.pendingQuestion) {
+      } else if (session.pendingQuestions.length > 0) {
         result.push({ sessionId: session.id, repoName: session.repoName, type: "question", logoUrl });
       }
     }
@@ -1023,7 +1025,7 @@ export class AgentManager {
         session.pendingPermissions.delete(toolUseId);
 
         // Only change status if no more pending permissions/questions/plan approvals
-        if (session.pendingPermissions.size === 0 && !session.pendingQuestion && !session.pendingPlanApproval) {
+        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
           session.status = "streaming";
         }
 
@@ -1095,8 +1097,12 @@ export class AgentManager {
 
       const timeoutId = setTimeout(() => {
         if (settled) return;
-        session.pendingQuestion = null;
-        if (session.pendingPermissions.size === 0 && !session.pendingPlanApproval) {
+        // Find and remove this question from the pending array
+        const idx = session.pendingQuestions.findIndex(q => q.toolUseId === toolUseId);
+        if (idx !== -1) {
+          session.pendingQuestions.splice(idx, 1);
+        }
+        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
           session.status = "streaming";
         }
 
@@ -1111,13 +1117,13 @@ export class AgentManager {
         safeResolve({ behavior: "deny", message: "Question timed out after 5 minutes" });
       }, PERMISSION_TIMEOUT_MS);
 
-      session.pendingQuestion = {
+      session.pendingQuestions.push({
         toolUseId,
         questions,
         originalInput: input,
         resolve: safeResolve,
         timeoutId,
-      };
+      });
       session.status = "needs_input";
       this.onSessionChange(this.getSessions());
 
@@ -1162,7 +1168,7 @@ export class AgentManager {
       const timeoutId = setTimeout(() => {
         if (settled) return;
         session.pendingPlanApproval = null;
-        if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
+        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0) {
           session.status = "streaming";
         }
 

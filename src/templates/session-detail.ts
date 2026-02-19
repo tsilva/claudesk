@@ -35,7 +35,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
       </div>
     </div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">
-      ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
+      ${messagesHtml || '<div id="empty-conversation-hint" class="empty-conversation-hint">Type a message to start</div>'}
     </div>
     <div id="drop-overlay" class="drop-overlay">
       <div class="drop-overlay-content">

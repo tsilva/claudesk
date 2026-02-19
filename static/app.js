@@ -858,6 +858,9 @@
     pendingAnswers = {};
     seenNotifications.delete("question:" + sessionId);
 
+    // Extract toolUseId from msgId (format: "q-{toolUseId}")
+    var toolUseId = msgId ? msgId.replace(/^q-/, '') : '';
+
     // Optimistically collapse the specific question message being answered
     var answerValues = Object.values(answers).filter(Boolean).join(', ');
     var badgeText = answerValues ? 'Answered: ' + answerValues : 'Answered';
@@ -880,7 +883,7 @@
     fetch("/api/agents/" + sessionId + "/answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: answers }),
+      body: JSON.stringify({ toolUseId: toolUseId, answers: answers }),
     }).catch(function () {
       removeTypingIndicator();
     });
@@ -1078,6 +1081,10 @@
   // Also scroll to bottom when new content arrives
   document.body.addEventListener("htmx:sseMessage", function (e) {
     if (e.detail.type === "stream-append") {
+      // Remove empty conversation hint when first message arrives
+      var emptyHint = document.getElementById("empty-conversation-hint");
+      if (emptyHint) emptyHint.remove();
+
       var data = e.detail.data || "";
       var temp = document.createElement("div");
       temp.innerHTML = data;

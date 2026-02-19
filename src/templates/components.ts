@@ -515,11 +515,9 @@ function renderUserMessage(msg: AgentMessage): string {
     attachmentsHtml += `</div>`;
   }
 
+  const trimmedText = text.trim();
   return `<div class="message message--user" data-id="${msg.id}" title="User">
-    <div class="message-content">
-      ${text.trim() ? escapeHtml(text) : ""}
-      ${attachmentsHtml}
-    </div>
+    <div class="message-content">${trimmedText ? escapeHtml(trimmedText) : ""}${attachmentsHtml}</div>
   </div>`;
 }
 

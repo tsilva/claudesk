@@ -11,7 +11,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: 1 line change
 - **Fix**: Expand regex to `/^(javascript|data|vbscript|file):/i`
 
-### 2. Missing Boolean Validation
+### 2. Missing Boolean Validation ✅
 - **File**: `src/server.ts:437`
 - **Issue**: `body.allow` not validated as actual boolean
 - **Impact**: API accepts malformed requests

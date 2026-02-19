@@ -436,6 +436,10 @@ app.post("/api/agents/:id/permission", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json<{ allow: boolean; message?: string; toolUseId?: string }>();
 
+    if (typeof body.allow !== 'boolean') {
+      return c.json({ error: "allow must be a boolean" }, 400);
+    }
+
     agentManager.respondToPermission(id, body.allow, body.message, body.toolUseId);
     return c.json({ ok: true });
   } catch (err: unknown) {

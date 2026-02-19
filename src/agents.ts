@@ -32,7 +32,7 @@ import { getReposDir } from "./config.ts";
 
 // --- Constants ---
 
-const ARCHIVED_MARKER = ".archived";
+const ARCHIVED_MARKER = ".archived.md";
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MESSAGE_WINDOW_LIMIT = 100; // Maximum messages to keep in memory per session
 

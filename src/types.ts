@@ -170,6 +170,40 @@ export interface RepoGitStatus {
 
 // --- Launchable Repos ---
 
+// --- SDK Content Block Types ---
+
+export interface SDKThinkingBlock {
+  type: "thinking";
+  thinking: string;
+}
+
+export interface SDKToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string | unknown;
+  is_error?: boolean;
+}
+
+export interface SDKSystemInitMessage {
+  type: "system";
+  subtype: "init";
+  session_id: string;
+  model?: string;
+}
+
+export interface SDKSystemHookMessage {
+  type: "system";
+  subtype: "hook_started";
+  hook_event: string;
+}
+
+export interface SDKResultErrorMessage {
+  type: "result";
+  uuid?: string;
+  result?: string;
+  error?: string;
+}
+
 // --- Persisted types (serializable to JSON) ---
 
 export interface PersistedMessage {

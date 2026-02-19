@@ -16,6 +16,11 @@ import type {
   PermissionMode,
   PermissionUpdate,
   ModelPreset,
+  SDKThinkingBlock,
+  SDKToolResultBlock,
+  SDKSystemInitMessage,
+  SDKSystemHookMessage,
+  SDKResultErrorMessage,
 } from "./types.ts";
 import {
   ensureDataDir,
@@ -416,6 +421,8 @@ export class AgentManager {
             role: "user" as const,
             content,
           },
+          parent_tool_use_id: null,
+          session_id: "",
         };
       }
       
@@ -425,7 +432,7 @@ export class AgentManager {
       prompt = text || "";
     }
 
-    const q = query({ prompt: prompt as any, options: options as any });
+    const q = query({ prompt, options });
 
     this.queries.set(sessionId, q);
     this.consumeStream(sessionId, q);
@@ -540,8 +547,8 @@ export class AgentManager {
       if (session.preset === 'opus-plan') {
         session.model = 'claude-sonnet-4-6';
         const q = this.queries.get(sessionId);
-        if (q && typeof (q as any).setModel === 'function') {
-          await (q as any).setModel('claude-sonnet-4-6').catch((err: unknown) =>
+        if (q && typeof q.setModel === 'function') {
+          await q.setModel('claude-sonnet-4-6').catch((err: unknown) =>
             console.warn(`[model-switch] setModel failed:`, err)
           );
         }
@@ -559,8 +566,8 @@ export class AgentManager {
     if (accept) {
       pending.resolve({ behavior: "allow", updatedPermissions: buildExitPlanPermissions(pending.suggestions) });
       const q = this.queries.get(sessionId);
-      if (q && typeof (q as any).setPermissionMode === "function") {
-        await (q as any).setPermissionMode("default").catch((err: unknown) =>
+      if (q && typeof q.setPermissionMode === "function") {
+        await q.setPermissionMode("default").catch((err: unknown) =>
           console.warn(`[plan-approval] setPermissionMode failed:`, err)
         );
       }
@@ -622,8 +629,8 @@ export class AgentManager {
     if (!session) throw new Error("Session not found");
     session.permissionMode = mode;
     const q = this.queries.get(sessionId);
-    if (q && typeof (q as any).setPermissionMode === "function") {
-      await (q as any).setPermissionMode(mode);
+    if (q && typeof q.setPermissionMode === "function") {
+      await q.setPermissionMode(mode);
     }
     this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
@@ -804,12 +811,12 @@ export class AgentManager {
         if (msg.subtype === "init") {
           session.sdkSessionId = msg.session_id;
           session.status = "streaming";
-          const initModel = (msg as any).model;
+          const initModel = (msg as SDKSystemInitMessage).model;
           // Accept whatever model the SDK resolved (may include version suffix)
           session.model = initModel ?? session.model;
           this.persistSession(sessionId, true);
           this.onSessionChange(this.getSessions());
-        } else if (msg.subtype === "hook_started" && (msg as any).hook_event === "Stop") {
+        } else if (msg.subtype === "hook_started" && (msg as SDKSystemHookMessage).hook_event === "Stop") {
           // Stop hooks only run after the model's turn is complete — use it to
           // set status to idle immediately rather than waiting for the result message.
           if (session.status === "streaming" || session.status === "starting") {
@@ -854,7 +861,7 @@ export class AgentManager {
                 text += block.text;
                 break;
               case "thinking":
-                contentBlocks.push({ type: "thinking", text: (block as any).thinking });
+                contentBlocks.push({ type: "thinking", text: (block as SDKThinkingBlock).thinking });
                 break;
               case "tool_use":
                 contentBlocks.push({
@@ -865,15 +872,16 @@ export class AgentManager {
                 });
                 break;
               case "tool_result": {
-                const toolUseId = (block as any).tool_use_id;
+                const toolResultBlock = block as SDKToolResultBlock;
+                const toolUseId = toolResultBlock.tool_use_id;
                 contentBlocks.push({
                   type: "tool_result",
-                  content: typeof (block as any).content === "string"
-                    ? (block as any).content
-                    : JSON.stringify((block as any).content),
+                  content: typeof toolResultBlock.content === "string"
+                    ? toolResultBlock.content
+                    : JSON.stringify(toolResultBlock.content),
                   toolUseId,
                   toolName: toolUseMap.get(toolUseId),
-                  isError: (block as any).is_error,
+                  isError: toolResultBlock.is_error,
                 });
                 break;
               }
@@ -952,7 +960,7 @@ export class AgentManager {
             id: msg.uuid ?? crypto.randomUUID(),
             type: "result",
             timestamp: new Date(),
-            text: (msg as any).error ?? "Agent ended with error",
+            text: (msg as SDKResultErrorMessage).error ?? "Agent ended with error",
             isError: true,
           };
           session.messages.push(agentMsg);

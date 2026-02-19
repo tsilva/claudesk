@@ -761,6 +761,15 @@ export class AgentManager {
         let text = "";
 
         if (Array.isArray(betaMsg.content)) {
+          // First pass: collect all tool_uses into a lookup map
+          const toolUseMap = new Map<string, string>();
+          for (const block of betaMsg.content) {
+            if (block.type === "tool_use") {
+              toolUseMap.set(block.id, block.name);
+            }
+          }
+
+          // Second pass: build contentBlocks
           for (const block of betaMsg.content) {
             switch (block.type) {
               case "text":
@@ -780,16 +789,13 @@ export class AgentManager {
                 break;
               case "tool_result": {
                 const toolUseId = (block as any).tool_use_id;
-                const matchingToolUse = contentBlocks.find(
-                  (b) => b.type === "tool_use" && b.toolUseId === toolUseId
-                );
                 contentBlocks.push({
                   type: "tool_result",
                   content: typeof (block as any).content === "string"
                     ? (block as any).content
                     : JSON.stringify((block as any).content),
                   toolUseId,
-                  toolName: matchingToolUse?.toolName,
+                  toolName: toolUseMap.get(toolUseId),
                   isError: (block as any).is_error,
                 });
                 break;

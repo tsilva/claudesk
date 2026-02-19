@@ -27,7 +27,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: Fix array iteration logic
 - **Fix**: Use `findLastIndex()` or reverse iteration to find newest assistant message
 
-### 4. Tool Result Matching Bug
+### 4. Tool Result Matching Bug ✅
 - **File**: `src/agents.ts:783-785`
 - **Issue**: Searches incrementally-built `contentBlocks` array; tool_results may not find their tool_use if SDK messages arrive out of order
 - **Impact**: Tool results display without tool name context

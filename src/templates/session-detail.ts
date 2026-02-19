@@ -1,7 +1,7 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, renderRawConversation } from "./components.ts";
 
-export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
+export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = [], isRawMode: boolean = false): string {
   // Find the most recent non-error result message to fold into last assistant message
   const resultMsg = messages.findLast((msg) => msg.type === "result" && !msg.isError);
   const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
@@ -26,12 +26,33 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
     .filter(Boolean)
     .join("\n");
 
-  return `<div class="session-detail" data-session-id="${session.id}">
+  const rawModeClass = isRawMode ? " raw-mode-active" : "";
+
+  if (isRawMode) {
+    const rawText = renderRawConversation(session, messages);
+    return `<div class="session-detail${rawModeClass}" data-session-id="${session.id}">
+      <div class="session-header">
+        <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
+        <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
+        <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
+          ${renderSessionHeaderStatus(session, true)}
+        </div>
+      </div>
+      <div class="raw-conversation-view" id="raw-conversation-view">
+        <pre class="raw-conversation-content">${escapeHtml(rawText)}</pre>
+      </div>
+      <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
+        ${renderSessionStats(session)}
+      </div>
+    </div>`;
+  }
+
+  return `<div class="session-detail${rawModeClass}" data-session-id="${session.id}">
     <div class="session-header">
       <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
       <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
       <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
-        ${renderSessionHeaderStatus(session)}
+        ${renderSessionHeaderStatus(session, false)}
       </div>
     </div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">

@@ -958,6 +958,47 @@ ul, ol {
 }
 
 /* --------------------------------------------------------------------------
+   Raw Mode
+   -------------------------------------------------------------------------- */
+.raw-conversation-view {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  background: var(--bg-primary);
+}
+
+.raw-conversation-content {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  max-width: 100%;
+}
+
+.raw-mode-active .conversation-stream {
+  display: none;
+}
+
+.raw-mode-active .message-input-area,
+.raw-mode-active #drop-overlay {
+  display: none;
+}
+
+/* Active button state */
+.btn--active {
+  background: var(--accent-orange);
+  color: var(--bg-primary);
+}
+
+/* --------------------------------------------------------------------------
    Messages
    -------------------------------------------------------------------------- */
 .message {

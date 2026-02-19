@@ -26,7 +26,7 @@ export function modeLabel(mode: PermissionMode): string {
 }
 
 export function modeTooltip(mode: PermissionMode): string {
-  return MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.plan;
+  return (MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.plan) as string;
 }
 
 export function nextMode(mode: PermissionMode): PermissionMode {
@@ -181,7 +181,7 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
 
 // --- Session Header Status ---
 
-export function renderSessionHeaderStatus(session: AgentSession): string {
+export function renderSessionHeaderStatus(session: AgentSession, isRawMode: boolean = false): string {
   const isActive = session.status === "streaming" || session.status === "starting";
   const timerTs = (isActive && session.turnStartedAt ? session.turnStartedAt : session.lastActivity).toISOString();
   return `${statusBadge(session.status)}
@@ -189,6 +189,7 @@ export function renderSessionHeaderStatus(session: AgentSession): string {
           data-last-activity="${timerTs}"
           data-status="${session.status}"></span>
     <span class="session-header-spacer"></span>
+    <button class="btn btn--ghost ${isRawMode ? 'btn--active' : ''}" onclick="toggleRawMode('${session.id}')" title="Toggle raw mode">${isRawMode ? 'Normal' : 'Raw'}</button>
     <button class="btn btn--ghost" onclick="focusEditor('${session.id}')" title="Open in editor">Editor</button>
     ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}`;
 }
@@ -257,11 +258,12 @@ export function renderPermissionPrompt(permission: PendingPermission, sessionId:
 // --- Question Prompt ---
 
 export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string, msgId?: string): string {
-  const singleQuestionSingleSelect = pending.questions.length === 1 && !pending.questions[0].multiSelect;
+  const singleQuestionSingleSelect = pending.questions.length === 1 && pending.questions[0] && !pending.questions[0].multiSelect;
 
   let questionsHtml = "";
   for (let i = 0; i < pending.questions.length; i++) {
     const q = pending.questions[i];
+    if (!q) continue;
     const qIndex = i;
 
     let optionsHtml = "";
@@ -838,4 +840,148 @@ function renderSystemMessage(msg: AgentMessage): string {
   return `<div class="message message--system" data-id="${msg.id}" title="System">
     <div class="message-content">${escapeHtml(msg.text)}</div>
   </div>`;
+}
+
+// --- Raw Mode ---
+
+export function renderRawConversation(session: AgentSession, messages: AgentMessage[]): string {
+  const lines: string[] = [];
+  lines.push(`=== SESSION: ${session.repoName} (${session.id}) ===`);
+  lines.push(`Model: ${session.model || "default"}`);
+  lines.push(`Mode: ${session.permissionMode || "default"}`);
+  lines.push(`Created: ${session.createdAt.toISOString()}`);
+  lines.push("");
+
+  for (const msg of messages) {
+    const timestamp = msg.timestamp.toISOString();
+    
+    switch (msg.type) {
+      case "user": {
+        lines.push(`=== USER [${timestamp}] ===`);
+        if (msg.userText || msg.text) {
+          lines.push(msg.userText || msg.text || "");
+        }
+        if (msg.attachments && msg.attachments.length > 0) {
+          lines.push("");
+          lines.push("--- ATTACHMENTS ---");
+          for (const att of msg.attachments) {
+            lines.push(`  - ${att.name} (${att.type}, ${att.size} bytes)`);
+          }
+        }
+        lines.push("");
+        break;
+      }
+      
+      case "assistant": {
+        lines.push(`=== ASSISTANT [${timestamp}] ===`);
+        if (msg.contentBlocks && msg.contentBlocks.length > 0) {
+          for (const block of msg.contentBlocks) {
+            switch (block.type) {
+              case "text":
+                if (block.text?.trim()) {
+                  lines.push("[TEXT]");
+                  lines.push(block.text);
+                  lines.push("");
+                }
+                break;
+              case "thinking":
+                if (block.text?.trim()) {
+                  lines.push("[THINKING]");
+                  lines.push(block.text);
+                  lines.push("");
+                }
+                break;
+              case "tool_use":
+                lines.push(`[TOOL_USE: ${block.toolName || "unknown"}]`);
+                lines.push(`toolUseId: ${block.toolUseId || "none"}`);
+                lines.push("input:");
+                lines.push(JSON.stringify(block.toolInput, null, 2));
+                lines.push("");
+                break;
+              case "tool_result":
+                lines.push(`[TOOL_RESULT: ${block.toolName || "unknown"}]`);
+                lines.push(`toolUseId: ${block.toolUseId || "none"}`);
+                lines.push(`isError: ${block.isError || false}`);
+                lines.push("content:");
+                lines.push(block.content || "");
+                lines.push("");
+                break;
+              case "image":
+                lines.push("[IMAGE]");
+                lines.push(`media_type: ${block.source?.media_type || "unknown"}`);
+                lines.push(`data: <base64 ${block.source?.data?.length || 0} chars>`);
+                lines.push("");
+                break;
+            }
+          }
+        }
+        break;
+      }
+      
+      case "system": {
+        if (msg.text) {
+          lines.push(`=== SYSTEM [${timestamp}] ===`);
+          lines.push(msg.text);
+          lines.push("");
+        }
+        break;
+      }
+      
+      case "result": {
+        lines.push(`=== RESULT [${timestamp}] ===`);
+        if (msg.isError) {
+          lines.push("ERROR");
+        }
+        lines.push(`Duration: ${msg.durationMs || 0}ms`);
+        lines.push(`Cost: $${msg.costUsd || 0}`);
+        lines.push(`Input tokens: ${msg.inputTokens || 0}`);
+        lines.push(`Output tokens: ${msg.outputTokens || 0}`);
+        lines.push(`Turns: ${msg.numTurns || 0}`);
+        lines.push("");
+        break;
+      }
+    }
+
+    // Permission data
+    if (msg.permissionData) {
+      lines.push(`=== PERMISSION [${timestamp}] ===`);
+      lines.push(`Tool: ${msg.permissionData.toolName}`);
+      lines.push(`toolUseId: ${msg.permissionData.toolUseId}`);
+      lines.push(`Status: ${msg.permissionData.resolved || "pending"}`);
+      lines.push("Input:");
+      lines.push(JSON.stringify(msg.permissionData.toolInput, null, 2));
+      lines.push("");
+    }
+
+    // Question data
+    if (msg.questionData) {
+      lines.push(`=== QUESTION [${timestamp}] ===`);
+      lines.push(`Status: ${msg.questionData.resolved || "pending"}`);
+      if (msg.questionData.answers) {
+        lines.push("Answers:");
+        for (const [questionText, answerText] of Object.entries(msg.questionData.answers)) {
+          lines.push(`  ${questionText}: ${answerText}`);
+        }
+      }
+      lines.push("");
+    }
+
+    // Plan approval data
+    if (msg.planApprovalData) {
+      lines.push(`=== PLAN_APPROVAL [${timestamp}] ===`);
+      lines.push(`Status: ${msg.planApprovalData.resolved || "pending"}`);
+      if (msg.planApprovalData.reviseFeedback) {
+        lines.push(`Feedback: ${msg.planApprovalData.reviseFeedback}`);
+      }
+      if (msg.planApprovalData.allowedPrompts.length > 0) {
+        lines.push("Allowed prompts:");
+        for (const p of msg.planApprovalData.allowedPrompts) {
+          lines.push(`  - ${p.tool}: ${p.prompt}`);
+        }
+      }
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
 }

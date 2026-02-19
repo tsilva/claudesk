@@ -6,7 +6,7 @@ import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
-import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderTurnCompleteFooter } from "./templates/components.ts";
+import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderTurnCompleteFooter, renderRawConversation } from "./templates/components.ts";
 
 const PORT = parseInt(process.env.CLAUDESK_PORT || process.env.PORT || "3456", 10);
 
@@ -269,6 +269,16 @@ app.get("/sessions/:id/detail", async (c) => {
   }
   const messages = agentManager.getRecentMessages(id);
   return c.html(renderSessionDetail(session, messages));
+});
+
+// Raw conversation text
+app.get("/sessions/:id/raw", async (c) => {
+  const id = c.req.param("id");
+  const session = agentManager.getSession(id);
+  if (!session) return c.json({ error: "not found" }, 404);
+  const messages = agentManager.getRecentMessages(id);
+  const rawText = renderRawConversation(session, messages);
+  return c.text(rawText);
 });
 
 // Focus the editor window for a session's repo
@@ -541,6 +551,20 @@ app.post("/api/repos/refresh", async (c) => {
   await agentManager.scanLaunchableRepos();
   broadcastSidebar().catch((err) => console.warn("[broadcastSidebar] error:", err));
   return c.json({ ok: true });
+});
+
+// Toggle raw mode - returns the session detail with raw mode enabled/disabled
+app.get("/sessions/:id/raw-toggle", async (c) => {
+  const id = c.req.param("id");
+  const session = agentManager.getSession(id);
+  if (!session) {
+    const repoCount = agentManager.getLaunchableRepos().length;
+    return c.html(renderEmptyDetail(repoCount));
+  }
+  const messages = agentManager.getRecentMessages(id);
+  // Check if currently in raw mode by looking at query param
+  const isRawMode = c.req.query("mode") === "raw";
+  return c.html(renderSessionDetail(session, messages, isRawMode));
 });
 
 // --- Start ---

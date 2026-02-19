@@ -977,6 +977,18 @@
     fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
   };
 
+  // --- Raw Mode Toggle ---
+
+  window.toggleRawMode = function (sessionId) {
+    var detail = document.getElementById("session-detail");
+    if (!detail) return;
+
+    var isRawMode = detail.querySelector(".raw-mode-active") !== null;
+    var mode = isRawMode ? "normal" : "raw";
+
+    htmx.ajax("GET", "/sessions/" + sessionId + "/raw-toggle?mode=" + mode, "#session-detail");
+  };
+
   // --- Permission Mode Cycling ---
 
   var MODE_ORDER = ['plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];

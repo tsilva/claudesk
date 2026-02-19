@@ -4,7 +4,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 
 ## TIER 1: Quick Wins (High Impact, Low Effort)
 
-### 1. XSS Protocol Filter Incomplete
+### 1. XSS Protocol Filter Incomplete ✅
 - **File**: `src/markdown.ts:30`
 - **Issue**: Only blocks `javascript:` and `data:` protocols; missing `vbscript:`, `file:`, etc.
 - **Impact**: Security vulnerability allowing malicious links

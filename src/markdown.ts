@@ -26,8 +26,8 @@ const marked = new Marked({
       return `<pre class="hljs">${langLabel}${copyBtn}<code>${highlighted}</code></pre>`;
     },
     link({ href, text }) {
-      // Strip javascript: and data: protocol links to prevent XSS
-      const safeHref = /^(javascript|data):/i.test(href ?? "") ? "#" : (href ?? "#");
+      // Strip dangerous protocol links to prevent XSS
+      const safeHref = /^(javascript|data|vbscript|file):/i.test(href ?? "") ? "#" : (href ?? "#");
       return `<a href="${escapeHtmlAttr(safeHref)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     },
   },

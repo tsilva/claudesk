@@ -1,81 +1,29 @@
-# Standard gitignore rules for tsilva organization
-# Used by scripts/sync-gitignore.sh
-
-# Claude Code
-.claude/*.local.json
-
-# Secrets and credentials
-.env
-.env.*
 !.env.example
-*.pem
-*.key
-*.p12
-credentials.json
-secrets.json
-.secrets/
-
-# macOS
-.DS_Store
-Thumbs.db
-
-# IDE
-.idea/
-.vscode/*
 !.vscode/settings.json
-*.swp
-*.swo
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
 *.egg-info/
-
-# Node.js
-node_modules/
-
-# Build artifacts
-dist/
-build/
-
-# Logs
-logs/
+*.key
 *.log
-
-# claudesk session data
+*.p12
+*.pem
+*.pyc
+*.swo
+*.swp
+.claude/*.local.json
 .claudesk/
-
-# Git worktrees
-.worktrees/
-
-# Managed by tsilva/.github
-# Do not remove - synced automatically
-.claude/*.local.json
+.DS_Store
 .env
 .env.*
-!.env.example
-*.pem
-*.key
-*.p12
-credentials.json
-secrets.json
-.secrets/
-.DS_Store
-Thumbs.db
 .idea/
-.vscode/*
-!.vscode/settings.json
-*.swp
-*.swo
-__pycache__/
-*.pyc
+.secrets/
 .venv/
-venv/
-*.egg-info/
-node_modules/
-dist/
+.vscode/*
+.worktrees/
+__pycache__/
 build/
+credentials.json
+dist/
 logs/
-*.log
+node_modules/
+secrets.json
+Thumbs.db
+venv/

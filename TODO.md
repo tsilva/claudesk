@@ -57,12 +57,16 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: Add cleanup mechanism
 - **Fix**: Add heartbeat timeout (30s) to remove stale clients
 
-### 8. Stream Consumer Error Handling Gap
-- **File**: `src/agents.ts:702-709`
-- **Issue**: Added null check for `s`, but still checks `s.status` separately which could be inconsistent if session state changes between checks
-- **Impact**: Error recovery may fail or show wrong state
-- **Effort**: Consolidate checks
-- **Fix**: Single read of session state with local variable
+### 8. Stream Consumer Error Handling Gap ✅
+- **File**: `src/agents.ts:702-709, 713-720, 722-736`
+- **Issue**: Multiple reads of `this.sessions.get(sessionId)` create race condition windows where session state could change between the null check and status check
+- **Impact**: Error recovery may fail or show wrong state if session is modified/deleted concurrently
+- **Effort**: Consolidate checks into local variables
+- **Fix**: 
+  1. Line 704-705: Keep the session read inside the loop (needed for each iteration)
+  2. Line 713-720: Read session once into local variable before checking `s.status === "streaming"`
+  3. Line 722-736: Read session once at start of catch block before checking `s.status !== "stopped"`
+  4. Ensure each logical block uses a single local variable reference to prevent TOCTOU race conditions
 
 ## TIER 4: Lower Priority / Refactoring
 

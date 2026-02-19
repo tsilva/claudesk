@@ -466,7 +466,7 @@ app.post("/api/agents/:id/plan-approval", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json<{ accept: boolean; feedback?: string }>();
 
-    agentManager.respondToPlanApproval(id, body.accept, body.feedback);
+    await agentManager.respondToPlanApproval(id, body.accept, body.feedback);
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);

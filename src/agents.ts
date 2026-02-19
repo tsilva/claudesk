@@ -441,7 +441,7 @@ export class AgentManager {
     });
   }
 
-  respondToPlanApproval(sessionId: string, accept: boolean, feedback?: string): void {
+  async respondToPlanApproval(sessionId: string, accept: boolean, feedback?: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session?.pendingPlanApproval) return;
 
@@ -459,10 +459,6 @@ export class AgentManager {
     }
 
     session.pendingPlanApproval = null;
-    // Only transition to streaming if no more pending permissions/questions
-    if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
-      session.status = "streaming";
-    }
 
     if (accept) {
       session.permissionMode = "default";
@@ -470,11 +466,17 @@ export class AgentManager {
         session.model = 'claude-sonnet-4-6';
         const q = this.queries.get(sessionId);
         if (q && typeof (q as any).setModel === 'function') {
-          (q as any).setModel('claude-sonnet-4-6').catch((err: unknown) =>
+          await (q as any).setModel('claude-sonnet-4-6').catch((err: unknown) =>
             console.warn(`[model-switch] setModel failed:`, err)
           );
         }
       }
+    }
+
+    // Only transition to streaming if no more pending permissions/questions
+    // This happens AFTER async operations complete to avoid status race
+    if (session.pendingPermissions.size === 0 && !session.pendingQuestion) {
+      session.status = "streaming";
     }
 
     this.onSessionChange(this.getSessions());
@@ -483,7 +485,7 @@ export class AgentManager {
       pending.resolve({ behavior: "allow", updatedPermissions: buildExitPlanPermissions(pending.suggestions) });
       const q = this.queries.get(sessionId);
       if (q && typeof (q as any).setPermissionMode === "function") {
-        (q as any).setPermissionMode("default").catch((err: unknown) =>
+        await (q as any).setPermissionMode("default").catch((err: unknown) =>
           console.warn(`[plan-approval] setPermissionMode failed:`, err)
         );
       }

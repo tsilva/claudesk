@@ -34,7 +34,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: Two-pass parsing approach
 - **Fix**: First pass collect all tool_uses, second pass match tool_results
 
-### 5. Status Race in Plan Approval
+### 5. Status Race in Plan Approval ✅
 - **File**: `src/agents.ts:461-465, 482-489`
 - **Issue**: Sets status to "streaming" before async model switch/permission mode changes complete
 - **Impact**: UI state inconsistent if async operations fail

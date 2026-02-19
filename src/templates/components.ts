@@ -231,7 +231,12 @@ export function renderSessionStats(session: AgentSession): string {
 // --- Permission Prompt ---
 
 export function renderPermissionPrompt(permission: PendingPermission, sessionId: string): string {
-  const inputPreview = JSON.stringify(permission.toolInput, null, 2);
+  let inputPreview: string;
+  try {
+    inputPreview = JSON.stringify(permission.toolInput, null, 2);
+  } catch {
+    inputPreview = "[Unable to display]";
+  }
   const displayInput = inputPreview.length > 500
     ? inputPreview.slice(0, 500) + "\n..."
     : inputPreview;
@@ -249,8 +254,8 @@ export function renderPermissionPrompt(permission: PendingPermission, sessionId:
     </div>
     <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
     <div class="permission-prompt-actions">
-      <button class="btn btn--primary" onclick="approvePermission('${sessionId}', '${escapeHtml(permission.toolUseId)}')">Allow</button>
-      <button class="btn" onclick="denyPermission('${sessionId}', '${escapeHtml(permission.toolUseId)}')">Deny</button>
+      <button class="btn btn--primary" onclick="approvePermission('${escapeJs(sessionId)}', '${escapeJs(permission.toolUseId)}')">Allow</button>
+      <button class="btn" onclick="denyPermission('${escapeJs(sessionId)}', '${escapeJs(permission.toolUseId)}')">Deny</button>
     </div>
   </div>`;
 }
@@ -362,7 +367,12 @@ function renderPermissionMessage(msg: AgentMessage): string {
   }
 
   // Pending: full permission prompt inline
-  const inputPreview = JSON.stringify(pd.toolInput, null, 2);
+  let inputPreview: string;
+  try {
+    inputPreview = JSON.stringify(pd.toolInput, null, 2);
+  } catch {
+    inputPreview = "[Unable to display]";
+  }
   const displayInput = inputPreview.length > 500
     ? inputPreview.slice(0, 500) + "\n..."
     : inputPreview;
@@ -382,13 +392,13 @@ function renderPermissionMessage(msg: AgentMessage): string {
         </div>
         <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
         <div class="permission-prompt-actions">
-          <button class="btn btn--primary" onclick="approvePermission('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}')">Allow</button>
-          <button class="btn" onclick="showDenyInput('${escapeHtml(sid)}', '${escapeHtml(toolUseId)}', this)">Deny</button>
+          <button class="btn btn--primary" onclick="approvePermission('${escapeJs(sid)}', '${escapeJs(toolUseId)}')">Allow</button>
+          <button class="btn" onclick="showDenyInput('${escapeJs(sid)}', '${escapeJs(toolUseId)}', this)">Deny</button>
         </div>
         <div class="deny-input-row" id="deny-row-${escapeHtml(toolUseId)}" style="display:none">
           <input type="text" class="deny-reason-input" placeholder="Denial reason (optional)..."
-            onkeydown="if(event.key==='Enter'){event.preventDefault();confirmDeny('${escapeHtml(sid)}','${escapeHtml(toolUseId)}',this)}">
-          <button class="btn" onclick="confirmDeny('${escapeHtml(sid)}','${escapeHtml(toolUseId)}',this.previousElementSibling)">Confirm Deny</button>
+            onkeydown="if(event.key==='Enter'){event.preventDefault();confirmDeny('${escapeJs(sid)}','${escapeJs(toolUseId)}',this)}">
+          <button class="btn" onclick="confirmDeny('${escapeJs(sid)}','${escapeJs(toolUseId)}',this.previousElementSibling)">Confirm Deny</button>
         </div>
       </div>
     </div>
@@ -483,9 +493,9 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
         ${planBodyHtml}
         ${promptsHtml ? `<div class="plan-approval-section-label">Requested permissions:</div>${promptsHtml}` : ""}
         <div class="plan-approval-actions">
-          <button class="btn btn--plan-accept" onclick="acceptPlan('${escapeHtml(sid)}')">Accept</button>
-          <input type="text" class="plan-revise-input" id="plan-revise-input-${escapeHtml(pd.toolUseId)}" placeholder="Revision feedback..." onkeydown="if(event.key==='Enter'){event.preventDefault();revisePlan('${escapeHtml(sid)}')}">
-          <button class="btn btn--plan-revise" onclick="revisePlan('${escapeHtml(sid)}')">Revise</button>
+          <button class="btn btn--plan-accept" onclick="acceptPlan('${escapeJs(sid)}')">Accept</button>
+          <input type="text" class="plan-revise-input" id="plan-revise-input-${escapeHtml(pd.toolUseId)}" placeholder="Revision feedback..." onkeydown="if(event.key==='Enter'){event.preventDefault();revisePlan('${escapeJs(sid)}')}">
+          <button class="btn btn--plan-revise" onclick="revisePlan('${escapeJs(sid)}')">Revise</button>
         </div>
       </div>
     </div>
@@ -502,7 +512,7 @@ function renderUserMessage(msg: AgentMessage): string {
     attachmentsHtml = `<div class="message-attachments">`;
     for (const att of msg.attachments!) {
       if (att.type.startsWith("image/")) {
-        attachmentsHtml += `<div class="attachment attachment--image" onclick="openImageLightbox('${escapeHtml(att.data)}')">
+        attachmentsHtml += `<div class="attachment attachment--image" onclick="openImageLightbox('${escapeJs(att.data)}')">
           <img src="data:${escapeHtml(att.type)};base64,${escapeHtml(att.data)}" alt="${escapeHtml(att.name)}">
         </div>`;
       } else if (att.type === "application/pdf") {
@@ -564,9 +574,14 @@ function renderContentBlock(block: ContentBlock): string {
 
     case "tool_use": {
       const name = block.toolName ?? "Unknown tool";
-      const rawJson = block.toolInput
-        ? JSON.stringify(block.toolInput, null, 2)
-        : "";
+      let rawJson = "";
+      if (block.toolInput) {
+        try {
+          rawJson = JSON.stringify(block.toolInput, null, 2);
+        } catch {
+          rawJson = "[Unable to display]";
+        }
+      }
 
       if (isTaskTool(name)) {
         return renderTaskToolUse(name, block.toolInput as Record<string, any>, rawJson);
@@ -625,7 +640,7 @@ function renderContentBlock(block: ContentBlock): string {
       if (!block.source?.data) return "";
       const mediaType = block.source.media_type || "image/png";
       return `<div class="content-block content-block--image">
-        <img src="data:${escapeHtml(mediaType)};base64,${escapeHtml(block.source.data)}" alt="Generated image" onclick="openImageLightbox('${escapeHtml(block.source.data)}', '${escapeHtml(mediaType)}')">
+        <img src="data:${escapeHtml(mediaType)};base64,${escapeHtml(block.source.data)}" alt="Generated image" onclick="openImageLightbox('${escapeJs(block.source.data)}', '${escapeJs(mediaType)}')">
       </div>`;
     }
 

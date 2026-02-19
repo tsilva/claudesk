@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
+import { stat } from "fs/promises";
 import { AgentManager } from "./agents.ts";
 import type { AgentSession, AgentMessage } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
@@ -88,7 +90,11 @@ const agentManager = new AgentManager(
       if (html) {
         if (msg.permissionData?.resolved || msg.questionData?.resolved || msg.planApprovalData?.resolved) {
           // Resolved: inject hx-swap-oob to replace existing element in-place
-          const oobHtml = html.replace(/^<div /, '<div hx-swap-oob="true" ');
+          // Use trimStart to handle any leading whitespace, then restore format
+          const trimmed = html.trimStart();
+          const oobHtml = trimmed.startsWith('<div ')
+            ? '<div hx-swap-oob="true" ' + trimmed.slice(5)
+            : html; // fallback: send as-is if unexpected format
           broadcast("stream-append", oobHtml, session.id);
         } else {
           // Pending: prepend as new message
@@ -159,6 +165,22 @@ const agentManager = new AgentManager(
 // --- Hono App ---
 
 const app = new Hono();
+
+// CORS: restrict to localhost origins only (prevents cross-site request forgery)
+app.use("*", cors({
+  origin: (origin) => {
+    if (!origin) return origin; // same-origin requests (no Origin header)
+    try {
+      const url = new URL(origin);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1") {
+        return origin;
+      }
+    } catch {}
+    return null;
+  },
+  allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowHeaders: ["Content-Type"],
+}));
 
 // Static files
 app.use("/static/*", serveStatic({ root: "./" }));
@@ -388,6 +410,16 @@ app.post("/api/agents/launch", async (c) => {
     const { cwd, model, permissionMode, preset } = body;
     if (!cwd) return c.json({ error: "cwd required" }, 400);
 
+    // Validate cwd exists and is a directory
+    try {
+      const cwdStat = await stat(cwd);
+      if (!cwdStat.isDirectory()) {
+        return c.json({ error: "cwd must be a directory" }, 400);
+      }
+    } catch {
+      return c.json({ error: "cwd does not exist" }, 400);
+    }
+
     if (permissionMode && !VALID_PERMISSION_MODES.has(permissionMode)) {
       return c.json({ error: "invalid permissionMode" }, 400);
     }
@@ -480,6 +512,11 @@ app.post("/api/agents/:id/answer", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json<{ toolUseId: string; answers: Record<string, string> }>();
 
+    if (typeof body.toolUseId !== 'string') return c.json({ error: "toolUseId must be a string" }, 400);
+    if (!body.answers || typeof body.answers !== 'object' || Array.isArray(body.answers)) {
+      return c.json({ error: "answers must be an object" }, 400);
+    }
+
     agentManager.answerQuestion(id, body.toolUseId, body.answers);
     return c.json({ ok: true });
   } catch (err: unknown) {
@@ -492,6 +529,8 @@ app.post("/api/agents/:id/plan-approval", async (c) => {
   try {
     const id = c.req.param("id");
     const body = await c.req.json<{ accept: boolean; feedback?: string }>();
+
+    if (typeof body.accept !== 'boolean') return c.json({ error: "accept must be a boolean" }, 400);
 
     await agentManager.respondToPlanApproval(id, body.accept, body.feedback);
     return c.json({ ok: true });
@@ -522,6 +561,7 @@ app.post("/api/agents/:id/mode", async (c) => {
 // Stop an agent
 app.post("/api/agents/:id/stop", async (c) => {
   const id = c.req.param("id");
+  if (!agentManager.getSession(id)) return c.json({ error: "session not found" }, 404);
   agentManager.stopAgent(id);
   return c.json({ ok: true });
 });
@@ -534,6 +574,9 @@ app.post("/api/agents/:id/model", async (c) => {
 
     if (!model) {
       return c.json({ error: "model required" }, 400);
+    }
+    if (!VALID_MODEL_IDS.has(model)) {
+      return c.json({ error: "invalid model" }, 400);
     }
 
     const session = agentManager.getSession(id);

@@ -5,7 +5,7 @@
   // --- State ---
   let notificationsEnabled = false;
   let currentSessionId = null;
-  var pendingAnswers = {}; // { questionText: selectedLabel(s) }
+  var pendingAnswers = {}; // { toolUseId: { questionText: selectedLabel(s) } }
   var seenNotifications = new Set(); // tracks "event:sessionId" keys to suppress replayed notifications
   var isUserScrolling = false;
   var scrollTimeout = null;
@@ -111,7 +111,7 @@
             if (data.sessionId) {
               switchSession(data.sessionId, { skipEditorFocus: true });
             }
-          });
+          }).catch(function (err) { console.warn("Focus dashboard failed:", err); });
           n.close();
         };
 
@@ -325,17 +325,19 @@
   // --- Session Dismiss ---
 
   window.dismissSession = function (sessionId) {
-    fetch("/sessions/" + sessionId, { method: "DELETE" }).then(function () {
-      if (sessionId === currentSessionId) {
-        currentSessionId = null;
-        var detail = document.getElementById("session-detail");
-        if (detail) detail.innerHTML = "";
-      }
-      // Clean up notification dedup state for this session
-      seenNotifications.forEach(function (k) {
-        if (k.endsWith(":" + sessionId)) seenNotifications.delete(k);
-      });
-    });
+    fetch("/sessions/" + sessionId, { method: "DELETE" })
+      .then(function () {
+        if (sessionId === currentSessionId) {
+          currentSessionId = null;
+          var detail = document.getElementById("session-detail");
+          if (detail) detail.innerHTML = "";
+        }
+        // Clean up notification dedup state for this session
+        seenNotifications.forEach(function (k) {
+          if (k.endsWith(":" + sessionId)) seenNotifications.delete(k);
+        });
+      })
+      .catch(function (err) { console.warn("Dismiss session failed:", err); });
   };
 
   // --- Session Switching ---
@@ -344,6 +346,8 @@
     if (sessionId === currentSessionId) return;
     currentSessionId = sessionId;
     pendingAnswers = {};
+    isUserScrolling = false;
+    if (scrollTimeout) { clearTimeout(scrollTimeout); scrollTimeout = null; }
 
     var cards = document.querySelectorAll(".session-card");
     cards.forEach(function (card) {
@@ -427,24 +431,19 @@
   var activeModelPicker = null;
 
   window.showModelPicker = function (event, sessionId) {
-    console.log("[showModelPicker] called with sessionId:", sessionId);
     event.stopPropagation();
     dismissModelPicker();
 
     var trigger = event.target;
-    console.log("[showModelPicker] trigger element:", trigger);
     var rect = trigger.getBoundingClientRect();
-    console.log("[showModelPicker] rect:", rect);
 
     var popover = document.createElement("div");
     popover.className = "model-picker-popover";
     popover.style.position = "fixed";
-    popover.style.bottom = "5px";
-    popover.style.left = "422px";
+    popover.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    popover.style.left = rect.left + "px";
     popover.style.zIndex = "9999";
-    console.log("[showModelPicker] popover styles:", popover.style.cssText);
 
-    console.log("[showModelPicker] adding", AVAILABLE_MODELS.length, "models");
     AVAILABLE_MODELS.forEach(function (m) {
       var opt = document.createElement("button");
       opt.className = "model-picker-option";
@@ -458,13 +457,10 @@
         updateSessionModel(sessionId, m.id);
       };
       popover.appendChild(opt);
-      console.log("[showModelPicker] added option:", m.label);
     });
 
     document.body.appendChild(popover);
     activeModelPicker = popover;
-    console.log("[showModelPicker] popover appended, children count:", popover.children.length);
-    console.log("[showModelPicker] popover HTML:", popover.outerHTML.substring(0, 200));
   };
 
   function dismissModelPicker() {
@@ -475,12 +471,10 @@
   }
 
   document.addEventListener("click", function (e) {
-    console.log("[click] clicked element:", e.target, "class:", e.target.className);
     // Handle model picker click via event delegation
     var target = e.target;
     if (target && target.getAttribute("data-action") === "show-model-picker") {
       var sessionId = target.getAttribute("data-session-id");
-      console.log("[click] model picker clicked, sessionId:", sessionId);
       if (sessionId) {
         e.stopPropagation();
         showModelPicker(e, sessionId);
@@ -700,7 +694,7 @@
     if (!text && pendingFiles.length === 0) return;
 
     // Disable input while sending
-    input.disabled = true;
+    if (input) input.disabled = true;
 
     createOptimisticUserMessage(text);
     showTypingIndicator();
@@ -735,15 +729,16 @@
     })
       .then(function (res) {
         if (!res.ok) throw new Error(res.statusText || "Send failed");
-        input.value = "";
+        if (input) input.value = "";
       })
       .catch(function (err) {
         console.error("Send failed:", err);
         removeTypingIndicator();
+        var optimistic = document.getElementById("optimistic-user-msg");
+        if (optimistic) optimistic.remove();
       })
       .finally(function () {
-        input.disabled = false;
-        input.focus();
+        if (input) { input.disabled = false; input.focus(); }
       });
   };
 
@@ -802,11 +797,16 @@
 
   // --- Question Interaction ---
 
+  function getToolUseId(msgId) {
+    return msgId ? msgId.replace(/^q-/, '') : '__default__';
+  }
+
   window.selectQuestionOption = function (btn) {
     var sessionId = btn.getAttribute("data-session");
     var question = btn.getAttribute("data-question");
     var label = btn.getAttribute("data-label");
     var msgId = btn.getAttribute("data-msg-id");
+    var toolUseId = getToolUseId(msgId);
 
     // Deselect siblings in same question block
     var block = btn.closest(".question-block");
@@ -816,7 +816,8 @@
       });
     }
     btn.classList.add("selected");
-    pendingAnswers[question] = label;
+    if (!pendingAnswers[toolUseId]) pendingAnswers[toolUseId] = {};
+    pendingAnswers[toolUseId][question] = label;
 
     // Single question, single select: auto-submit
     var prompt = btn.closest(".question-prompt");
@@ -829,6 +830,8 @@
   window.toggleQuestionOption = function (btn) {
     var question = btn.getAttribute("data-question");
     var label = btn.getAttribute("data-label");
+    var msgId = btn.getAttribute("data-msg-id");
+    var toolUseId = getToolUseId(msgId);
 
     btn.classList.toggle("selected");
 
@@ -840,13 +843,15 @@
         selected.push(b.getAttribute("data-label"));
       });
     }
-    pendingAnswers[question] = selected.join(", ");
+    if (!pendingAnswers[toolUseId]) pendingAnswers[toolUseId] = {};
+    pendingAnswers[toolUseId][question] = selected.join(", ");
   };
 
   window.selectQuestionOther = function (inputEl) {
     var sessionId = inputEl.getAttribute("data-session");
     var question = inputEl.getAttribute("data-question");
     var msgId = inputEl.getAttribute("data-msg-id");
+    var toolUseId = getToolUseId(msgId);
     var value = inputEl.value.trim();
     if (!value) return;
 
@@ -858,7 +863,8 @@
       });
     }
 
-    pendingAnswers[question] = value;
+    if (!pendingAnswers[toolUseId]) pendingAnswers[toolUseId] = {};
+    pendingAnswers[toolUseId][question] = value;
 
     // Single question: auto-submit
     var prompt = inputEl.closest(".question-prompt");
@@ -869,12 +875,10 @@
   };
 
   window.submitQuestionAnswers = function (sessionId, msgId) {
-    var answers = Object.assign({}, pendingAnswers);
-    pendingAnswers = {};
+    var toolUseId = getToolUseId(msgId);
+    var answers = Object.assign({}, pendingAnswers[toolUseId] || {});
+    delete pendingAnswers[toolUseId];
     seenNotifications.delete("question:" + sessionId);
-
-    // Extract toolUseId from msgId (format: "q-{toolUseId}")
-    var toolUseId = msgId ? msgId.replace(/^q-/, '') : '';
 
     // Optimistically collapse the specific question message being answered
     var answerValues = Object.values(answers).filter(Boolean).join(', ');
@@ -941,8 +945,8 @@
     });
   };
 
-  window.copyCode = function (btn, encodedText) {
-    var text = decodeURIComponent(encodedText);
+  window.copyCode = function (btn) {
+    var text = btn.getAttribute("data-code") || "";
     navigator.clipboard.writeText(text).then(function () {
       var orig = btn.textContent;
       btn.textContent = "Copied!";
@@ -970,11 +974,12 @@
     fetch("/api/agents/" + sessionId + "/stop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    });
+    }).catch(function (err) { console.warn("Stop agent failed:", err); });
   };
 
   window.focusEditor = function (sessionId) {
-    fetch("/sessions/" + sessionId + "/focus", { method: "POST" });
+    fetch("/sessions/" + sessionId + "/focus", { method: "POST" })
+      .catch(function (err) { console.warn("Focus editor failed:", err); });
   };
 
   // --- Raw Mode Toggle ---
@@ -1027,6 +1032,14 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: nextMode })
+    }).then(function (res) {
+      if (!res.ok) throw new Error('Mode change failed');
+    }).catch(function () {
+      // Rollback optimistic update on failure
+      indicator.textContent = MODE_LABELS[currentMode];
+      indicator.title = (MODE_TOOLTIPS[currentMode] || MODE_TOOLTIPS.plan) + ' (shift+tab)';
+      MODE_ORDER.forEach(function (m) { indicator.classList.remove('mode-stat--' + m); });
+      indicator.classList.add('mode-stat--' + currentMode);
     });
   };
 

@@ -80,12 +80,15 @@ export function serializeSession(session: AgentSession): PersistedSession {
 }
 
 export function deserializeSession(data: PersistedSession): AgentSession {
+  // Preserve terminal statuses; reset transient ones to idle
+  const transientStatuses = new Set(["streaming", "starting", "needs_input"]);
+  const restoredStatus = transientStatuses.has(data.status) ? "idle" : (data.status ?? "idle");
   return {
     id: data.id,
     sdkSessionId: data.sdkSessionId,
     repoName: data.repoName,
     cwd: data.cwd,
-    status: "idle",
+    status: restoredStatus,
     lastMessagePreview: data.lastMessagePreview,
     lastActivity: new Date(data.lastActivity),
     createdAt: new Date(data.createdAt),

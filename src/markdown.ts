@@ -21,8 +21,7 @@ const marked = new Marked({
       const langLabel = language
         ? `<span class="code-lang">${escapeHtmlAttr(language)}</span>`
         : "";
-      const encodedText = encodeURIComponent(text);
-      const copyBtn = `<button class="code-copy-btn" onclick="copyCode(this,'${encodedText}')" title="Copy code">Copy</button>`;
+      const copyBtn = `<button class="code-copy-btn" data-code="${escapeHtmlAttr(text)}" onclick="copyCode(this)" title="Copy code">Copy</button>`;
       return `<pre class="hljs">${langLabel}${copyBtn}<code>${highlighted}</code></pre>`;
     },
     link({ href, text }) {

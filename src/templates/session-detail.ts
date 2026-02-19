@@ -15,7 +15,7 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
       // Inject footer into the first (newest) assistant message (array is reversed for display)
       if (!footerInjected && footerHtml && msg.type === "assistant") {
         // Check if this is the first assistant message in the array (newest when reversed)
-        const firstAssistantIndex = arr.findIndex((m) => m.type === "assistant");
+        const firstAssistantIndex = arr.findLastIndex((m) => m.type === "assistant");
         if (_i === firstAssistantIndex) {
           footerInjected = true;
           return html.replace(/<\/div><\/div>$/, footerHtml + "</div></div>");

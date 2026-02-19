@@ -20,7 +20,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 
 ## TIER 2: High Impact, Medium Effort
 
-### 3. Footer Injection Logic Error
+### 3. Footer Injection Logic Error ✅
 - **File**: `src/templates/session-detail.ts:15-23`
 - **Issue**: Uses `findIndex()` which returns first match in chronological order, but UI displays reverse order - injects footer into wrong message
 - **Impact**: UI shows completion stats on wrong message

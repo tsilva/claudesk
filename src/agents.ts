@@ -1243,6 +1243,19 @@ export class AgentManager {
       }));
 
       this.launchableRepos = repos.sort((a, b) => a.name.localeCompare(b.name));
+
+      // Update cachedPendingCounts with launchable repos' git status
+      for (const repo of this.launchableRepos) {
+        if (repo.gitStatus && (
+          repo.gitStatus.uncommitted > 0 ||
+          repo.gitStatus.unpulled > 0 ||
+          repo.gitStatus.unpushed > 0
+        )) {
+          this.cachedPendingCounts.set(repo.path, repo.gitStatus);
+        } else {
+          this.cachedPendingCounts.delete(repo.path);
+        }
+      }
     } catch {
       this.launchableRepos = [];
     }

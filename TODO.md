@@ -77,7 +77,7 @@ Ranked by ROI (impact vs effort) - highest value fixes first.
 - **Effort**: Add pagination or windowing
 - **Fix**: Implemented message windowing with `MESSAGE_WINDOW_LIMIT = 100` and `trimMessageWindow()` helper that preserves system messages and pending interactions while limiting memory usage
 
-### 10. Git Status Cache Stale
+### 10. Git Status Cache Stale  ✅
 - **File**: `src/agents.ts:1131-1139`
 - **Issue**: `scanLaunchableRepos` doesn't update `cachedPendingCounts`
 - **Impact**: Git badges show stale data

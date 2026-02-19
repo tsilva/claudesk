@@ -1,5 +1,5 @@
 import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, modeLabel, modeTooltip } from "./components.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter } from "./components.ts";
 
 export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = []): string {
   // Find the most recent non-error result message to fold into last assistant message
@@ -34,9 +34,14 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
         ${renderSessionHeaderStatus(session)}
       </div>
     </div>
-    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend"
-      ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+    <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">
       ${messagesHtml || '<div class="empty-conversation-hint">Type a message to start</div>'}
+    </div>
+    <div id="drop-overlay" class="drop-overlay">
+      <div class="drop-overlay-content">
+        <span class="drop-overlay-icon">&#128206;</span>
+        <span class="drop-overlay-text">Drop files to attach</span>
+      </div>
     </div>
     <div class="message-input-area">
       <form id="message-form" onsubmit="sendMessage(event, '${session.id}')" enctype="multipart/form-data">
@@ -47,7 +52,6 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
           onkeydown="handleMessageKeydown(event, '${session.id}')"
           onpaste="handleMessagePaste(event)"
           ${session.status === "streaming" || session.status === "starting" ? "disabled" : ""}></textarea>
-        <div class="drop-zone-hint">Drop files here to attach</div>
       </form>
     </div>
     <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
@@ -66,7 +70,7 @@ export function renderEmptyDetail(repoCount = 0): string {
   }
   return `<div class="empty-state">
     <div class="empty-state-icon">&#9673;</div>
-    <div class="empty-state-text">Pick a repo and choose a model to start</div>
-    <div class="empty-state-hint">Select a repo from the sidebar to launch a new agent session</div>
+    <div class="empty-state-text">Select a repo to start</div>
+    <div class="empty-state-hint">Click any repo in the sidebar to create a new session.<br>You can change the model before sending your first message.</div>
   </div>`;
 }

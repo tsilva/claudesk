@@ -383,18 +383,11 @@
     "opus-plan": { label: "Opus Plan", description: "Plans with Opus, executes with Sonnet", model: "claude-opus-4-6", permissionMode: "plan" },
   };
 
-  window.createSession = function (cwd, presetKey) {
-    var preset = presetKey ? MODEL_PRESETS[presetKey] : null;
-    var body = { cwd: cwd };
-    if (preset) {
-      body.model = preset.model;
-      body.permissionMode = preset.permissionMode;
-      body.preset = presetKey;
-    }
+  window.createSession = function (cwd) {
     fetch("/api/agents/launch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ cwd: cwd }),
     })
       .then(function (res) { return res.json(); })
       .then(function (data) {
@@ -408,52 +401,98 @@
       });
   };
 
-  // --- Model Picker Popover ---
+  // --- Model Selector Popup ---
 
-  var activePopover = null;
+  var AVAILABLE_MODELS = [
+    { id: "claude-opus-4-6", label: "Opus 4.6", description: "Powerful — best for complex tasks" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", description: "Fast & capable — great for most tasks" },
+    { id: "claude-opus-4-5", label: "Opus 4.5", description: "Previous generation Opus" },
+    { id: "claude-sonnet-4-5", label: "Sonnet 4.5", description: "Previous generation Sonnet" },
+    { id: "claude-haiku-4-5-20251001", label: "Haiku", description: "Fastest — for simple tasks" },
+  ];
 
-  window.showModelPicker = function (event, cwd) {
+  var activeModelPicker = null;
+
+  window.showModelPicker = function (event, sessionId) {
+    console.log("[showModelPicker] called with sessionId:", sessionId);
     event.stopPropagation();
     dismissModelPicker();
 
     var trigger = event.target;
+    console.log("[showModelPicker] trigger element:", trigger);
     var rect = trigger.getBoundingClientRect();
+    console.log("[showModelPicker] rect:", rect);
 
     var popover = document.createElement("div");
     popover.className = "model-picker-popover";
-    popover.style.top = (rect.bottom + window.scrollY + 4) + "px";
-    popover.style.left = (rect.left + window.scrollX) + "px";
+    popover.style.position = "fixed";
+    popover.style.bottom = "5px";
+    popover.style.left = "422px";
+    popover.style.zIndex = "9999";
+    console.log("[showModelPicker] popover styles:", popover.style.cssText);
 
-    Object.keys(MODEL_PRESETS).forEach(function (key) {
-      var p = MODEL_PRESETS[key];
+    console.log("[showModelPicker] adding", AVAILABLE_MODELS.length, "models");
+    AVAILABLE_MODELS.forEach(function (m) {
       var opt = document.createElement("button");
       opt.className = "model-picker-option";
       opt.type = "button";
       opt.innerHTML =
-        '<span class="model-picker-label">' + escapeHtmlClient(p.label) + '</span>' +
-        '<span class="model-picker-desc">' + escapeHtmlClient(p.description) + '</span>';
+        '<span class="model-picker-label">' + escapeHtmlClient(m.label) + '</span>' +
+        '<span class="model-picker-desc">' + escapeHtmlClient(m.description) + '</span>';
       opt.onclick = function (e) {
         e.stopPropagation();
         dismissModelPicker();
-        createSession(cwd, key);
+        updateSessionModel(sessionId, m.id);
       };
       popover.appendChild(opt);
+      console.log("[showModelPicker] added option:", m.label);
     });
 
     document.body.appendChild(popover);
-    activePopover = popover;
+    activeModelPicker = popover;
+    console.log("[showModelPicker] popover appended, children count:", popover.children.length);
+    console.log("[showModelPicker] popover HTML:", popover.outerHTML.substring(0, 200));
   };
 
   function dismissModelPicker() {
-    if (activePopover) {
-      activePopover.remove();
-      activePopover = null;
+    if (activeModelPicker) {
+      activeModelPicker.remove();
+      activeModelPicker = null;
     }
   }
 
-  document.addEventListener("click", function () {
+  document.addEventListener("click", function (e) {
+    console.log("[click] clicked element:", e.target, "class:", e.target.className);
+    // Handle model picker click via event delegation
+    var target = e.target;
+    if (target && target.getAttribute("data-action") === "show-model-picker") {
+      var sessionId = target.getAttribute("data-session-id");
+      console.log("[click] model picker clicked, sessionId:", sessionId);
+      if (sessionId) {
+        e.stopPropagation();
+        showModelPicker(e, sessionId);
+        return;
+      }
+    }
     dismissModelPicker();
   });
+
+  window.updateSessionModel = function (sessionId, model) {
+    fetch("/api/agents/" + sessionId + "/model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model }),
+    })
+      .then(function (res) {
+        if (res.ok) {
+          // Refresh the session stats to show new model
+          htmx.ajax("GET", "/sessions/" + sessionId + "/detail", "#session-detail");
+        }
+      })
+      .catch(function (err) {
+        console.error("Update model failed:", err);
+      });
+  };
 
   window.handleMessageKeydown = function (event, sessionId) {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -507,40 +546,59 @@
     event.target.value = ''; // Reset input for re-selection
   };
 
-  window.handleDragOver = function (event) {
-    event.preventDefault();
-    event.stopPropagation();
-    var stream = document.getElementById('conversation-stream');
-    if (stream) stream.classList.add('drag-over');
-  };
+  // --- Global Drag and Drop ---
+  var dragCounter = 0;
 
-  window.handleDragLeave = function (event) {
-    event.preventDefault();
-    event.stopPropagation();
-    var stream = document.getElementById('conversation-stream');
-    if (stream) stream.classList.remove('drag-over');
-  };
+  function showDropOverlay() {
+    var overlay = document.getElementById('drop-overlay');
+    if (overlay) overlay.classList.add('active');
+  }
 
-  window.handleDrop = function (event) {
+  function hideDropOverlay() {
+    var overlay = document.getElementById('drop-overlay');
+    if (overlay) overlay.classList.remove('active');
+  }
+
+  document.addEventListener('dragenter', function (event) {
     event.preventDefault();
-    event.stopPropagation();
-    var stream = document.getElementById('conversation-stream');
-    if (stream) stream.classList.remove('drag-over');
-    
+    dragCounter++;
+    if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
+      showDropOverlay();
+    }
+  });
+
+  document.addEventListener('dragleave', function (event) {
+    event.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      hideDropOverlay();
+    }
+  });
+
+  document.addEventListener('dragover', function (event) {
+    event.preventDefault();
+  });
+
+  document.addEventListener('drop', function (event) {
+    event.preventDefault();
+    dragCounter = 0;
+    hideDropOverlay();
+
     var files = event.dataTransfer.files;
     if (!files || files.length === 0) return;
-    
+
     for (var i = 0; i < files.length; i++) {
       pendingFiles.push(files[i]);
     }
     updateAttachmentPreview();
-    
+
     // Focus the message input after dropping files
     var input = document.querySelector('.message-input');
     if (input && !input.disabled) {
       input.focus();
     }
-  };
+  });
 
   window.removeAttachment = function (index) {
     pendingFiles.splice(index, 1);

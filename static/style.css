@@ -1826,6 +1826,18 @@ button.launch-item {
   gap: 8px;
 }
 
+/* Model Selector in Footer */
+.model-stat--interactive {
+  cursor: pointer;
+  color: var(--accent-orange);
+  border-bottom: 1px dotted var(--accent-orange);
+}
+
+.model-stat--interactive:hover {
+  color: var(--text-primary);
+  border-bottom-style: solid;
+}
+
 .message-input {
   flex: 1;
   min-width: 0;
@@ -2590,40 +2602,43 @@ button.launch-item {
 /* --------------------------------------------------------------------------
    Drag and Drop File Attachments
    -------------------------------------------------------------------------- */
-.drop-zone-hint {
+.drop-overlay {
   display: none;
-  position: absolute;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 16px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.conversation-stream.drag-over .drop-zone-hint {
-  display: block;
-  border-color: var(--accent-orange);
-  background: rgba(217, 119, 87, 0.1);
-}
-
-.conversation-stream.drag-over {
-  position: relative;
-}
-
-.conversation-stream.drag-over::before {
-  content: '';
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(20, 20, 19, 0.7);
-  z-index: 5;
+  background: rgba(20, 20, 19, 0.85);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
+}
+
+.drop-overlay.active {
+  display: flex;
+}
+
+.drop-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 60px;
+  background: var(--bg-secondary);
+  border: 2px dashed var(--accent-orange);
+  border-radius: 12px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.drop-overlay-icon {
+  font-size: 48px;
+  opacity: 0.9;
+}
+
+.drop-overlay-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
 }

@@ -38,7 +38,7 @@ export function renderSidebar(
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeJs(repoName)}')">&#9734;</span>
         <span>${escapeHtml(repoName)}</span>
         ${renderGitBadges(groupStatus)}
-        <span class="launch-item-action" onclick="event.stopPropagation(); showModelPicker(event, '${escapeJs(cwd)}')" style="cursor:pointer">+</span>
+        <span class="launch-item-action" onclick="event.stopPropagation(); createSession('${escapeJs(cwd)}')" style="cursor:pointer">+</span>
       </div>`;
 
     for (const session of repoSessions) {
@@ -84,7 +84,7 @@ export function renderSidebar(
       </div>`;
 
     for (const repo of launchRepos) {
-      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="showModelPicker(event, '${escapeJs(repo.path)}')">
+      html += `<button class="launch-item" data-repo="${escapeHtml(repo.name)}" onclick="createSession('${escapeJs(repo.path)}')">
         <span class="star-btn" onclick="event.stopPropagation(); toggleStar('${escapeJs(repo.name)}')">&#9734;</span>
         <span>${escapeHtml(repo.name)}</span>
         ${renderGitBadges(repo.gitStatus)}

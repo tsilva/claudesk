@@ -160,9 +160,14 @@ export class AgentManager {
 
   // --- Public API ---
 
+  private lastUsedModel: string = "claude-opus-4-6";
+
   createSession(cwd: string, model?: string, permissionMode?: PermissionMode, preset?: ModelPreset): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
+
+    // Use provided model, or fall back to last used model
+    const sessionModel = model || this.lastUsedModel;
 
     const session: AgentSession = {
       id,
@@ -178,7 +183,7 @@ export class AgentManager {
       inputTokens: 0,
       outputTokens: 0,
       turnCount: 0,
-      model: model || "claude-opus-4-6",
+      model: sessionModel,
       preset,
       permissionMode: permissionMode || "plan",
       pendingQuestion: null,
@@ -269,6 +274,10 @@ export class AgentManager {
     session.lastActivity = new Date();
     session.turnStartedAt = session.lastActivity;
     session.status = "streaming";
+
+    // Track this model as the last used for future sessions
+    this.lastUsedModel = session.model;
+
     this.persistSession(sessionId);
     this.onMessage(userMsg, session);
     this.onSessionChange(this.getSessions());
@@ -539,6 +548,18 @@ export class AgentManager {
     if (q && typeof (q as any).setPermissionMode === "function") {
       await (q as any).setPermissionMode(mode);
     }
+    this.persistSession(sessionId, true);
+    this.onSessionChange(this.getSessions());
+  }
+
+  setSessionModel(sessionId: string, model: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    // Only allow changing model before first message is sent
+    if (session.messages.length > 0) {
+      throw new Error("Cannot change model after conversation has started");
+    }
+    session.model = model;
     this.persistSession(sessionId, true);
     this.onSessionChange(this.getSessions());
   }

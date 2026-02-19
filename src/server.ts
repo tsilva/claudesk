@@ -301,10 +301,11 @@ app.post("/api/focus-dashboard", async (c) => {
     for (const line of lines) {
       const [windowId, appName, windowTitle, workspace] = line.split("|");
       if (
+        appName && windowTitle &&
         BROWSER_APPS.includes(appName.toLowerCase()) &&
         windowTitle.toLowerCase().includes("claudesk")
       ) {
-        match = { windowId: windowId.trim(), workspace: workspace.trim() };
+        match = { windowId: windowId?.trim() ?? "", workspace: workspace?.trim() ?? "" };
         break;
       }
     }
@@ -492,6 +493,26 @@ app.post("/api/agents/:id/stop", async (c) => {
   const id = c.req.param("id");
   agentManager.stopAgent(id);
   return c.json({ ok: true });
+});
+
+// Update session model (only allowed before first message)
+app.post("/api/agents/:id/model", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const { model } = await c.req.json<{ model: string }>();
+
+    if (!model) {
+      return c.json({ error: "model required" }, 400);
+    }
+
+    const session = agentManager.getSession(id);
+    if (!session) return c.json({ error: "session not found" }, 404);
+
+    agentManager.setSessionModel(id, model);
+    return c.json({ ok: true });
+  } catch (err: unknown) {
+    return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
+  }
 });
 
 // Refresh repo git status

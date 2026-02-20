@@ -49,3 +49,4 @@ logs/
 # Project-specific rules
 .claudesk/
 .worktrees/
+.mcp.json

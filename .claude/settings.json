@@ -7,14 +7,24 @@
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
-        "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q '\\.ts\"'; then bunx tsc --noEmit 2>&1 | head -20; fi",
-        "timeout": 15000
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -q '\\.ts\"'; then bunx tsc --noEmit 2>&1 | head -20; fi",
+            "timeout": 15000
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
-        "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE '(bun\\.lock|\\.env)'; then echo 'BLOCK: Cannot edit lock files or .env files' >&2; exit 1; fi"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE '(bun\\.lock|\\.env)'; then echo 'BLOCK: Cannot edit lock files or .env files' >&2; exit 1; fi"
+          }
+        ]
       }
     ]
   }

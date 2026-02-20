@@ -9,6 +9,16 @@
   var seenNotifications = new Set(); // tracks "event:sessionId" keys to suppress replayed notifications
   var isUserScrolling = false;
   var scrollTimeout = null;
+  var isProgrammaticScroll = false;
+
+  function scrollToNewest(container) {
+    if (!container) return;
+    isProgrammaticScroll = true;
+    container.scrollTop = 0;
+    requestAnimationFrame(function() {
+      isProgrammaticScroll = false;
+    });
+  }
 
 
   // --- Notifications ---
@@ -300,11 +310,12 @@
     if (e.detail.target && e.detail.target.id === "session-detail") {
       var container = document.getElementById("conversation-stream");
       if (container) {
-        container.scrollTop = 0;
+        scrollToNewest(container);
         // Track user scrolling on conversation stream (only attach once)
         if (!container.dataset.scrollTrackingAttached) {
           container.dataset.scrollTrackingAttached = "true";
           container.addEventListener("scroll", function() {
+            if (isProgrammaticScroll) return;
             isUserScrolling = true;
             if (scrollTimeout) clearTimeout(scrollTimeout);
             scrollTimeout = setTimeout(function() {
@@ -701,7 +712,7 @@
 
     var container = document.getElementById("conversation-stream");
     if (container) {
-        container.scrollTop = 0;
+        scrollToNewest(container);
     }
 
     var body;
@@ -1061,7 +1072,7 @@
     msg.id = "optimistic-user-msg";
     msg.innerHTML = '<div class="message-content">' + escapeHtmlClient(text) + '</div>';
     container.appendChild(msg);
-    container.scrollTop = 0;
+    scrollToNewest(container);
   }
 
   // --- Finishing Indicator (shown while stop hooks run after model reply) ---
@@ -1079,7 +1090,7 @@
       '<span class="finishing-indicator-dot"></span>' +
       '<span class="finishing-indicator-dot"></span>';
     container.appendChild(indicator);
-    container.scrollTop = 0;
+    scrollToNewest(container);
   }
 
   function removeFinishingIndicator() {
@@ -1114,7 +1125,7 @@
       '<div class="typing-indicator-dot"></div>' +
       '<div class="typing-indicator-dot"></div>';
     container.appendChild(indicator);
-    container.scrollTop = 0;
+    scrollToNewest(container);
   }
 
   function removeTypingIndicator() {
@@ -1144,7 +1155,7 @@
       var scrollAfterSwap = function() {
         var container = document.getElementById("conversation-stream");
         if (container && shouldScroll) {
-          container.scrollTop = 0;
+          scrollToNewest(container);
         }
       };
       // Use setTimeout to ensure the DOM has been updated by HTMX
@@ -1176,7 +1187,7 @@
     // Only auto-scroll if user is not actively scrolling
     if (!isUserScrolling) {
       requestAnimationFrame(function () {
-        container.scrollTop = 0;
+        scrollToNewest(container);
       });
     }
   });

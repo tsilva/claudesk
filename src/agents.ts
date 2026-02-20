@@ -320,8 +320,7 @@ export class AgentManager {
 
     // Convert attachments to SDK format
     const userAttachments: import("./types.ts").Attachment[] = [];
-    const contentBlocks: import("./types.ts").ContentBlock[] = [];
-    
+
     if (attachments && attachments.length > 0) {
       for (const att of attachments) {
         userAttachments.push({
@@ -331,18 +330,6 @@ export class AgentManager {
           size: att.size,
           data: att.data,
         });
-        
-        // For images, create image content blocks for the SDK
-        if (att.type.startsWith("image/")) {
-          contentBlocks.push({
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: att.type,
-              data: att.data,
-            },
-          });
-        }
       }
     }
 
@@ -375,8 +362,7 @@ export class AgentManager {
       attachments: userAttachments,
       rawRequest,
     };
-    session.messages.push(userMsg);
-    session.messages = trimMessageWindow(session.messages);
+    this.pushMessage(session, userMsg);
     session.lastMessagePreview = text.slice(0, 80);
     session.lastActivity = new Date();
     session.turnStartedAt = session.lastActivity;
@@ -511,9 +497,7 @@ export class AgentManager {
     session.pendingPermissions.delete(pending.toolUseId);
 
     // Only transition to streaming if no more pending permissions/questions/plan approvals
-    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
-      session.status = "streaming";
-    }
+    this.resumeIfNoPending(session);
     this.fireOnSessionChange();
 
     if (allow) {
@@ -547,11 +531,9 @@ export class AgentManager {
 
     // Remove this question from the pending array
     session.pendingQuestions.splice(pendingIndex, 1);
-    
+
     // Only transition to streaming if no more pending permissions/questions/plan approvals
-    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
-      session.status = "streaming";
-    }
+    this.resumeIfNoPending(session);
     this.fireOnSessionChange();
 
     pending.resolve({
@@ -620,6 +602,35 @@ export class AgentManager {
     }
   }
 
+  private resolveAllPending(session: AgentSession, reason: string): void {
+    for (const perm of session.pendingPermissions.values()) {
+      clearTimeout(perm.timeoutId);
+      perm.resolve({ behavior: "deny", message: reason });
+    }
+    session.pendingPermissions.clear();
+    for (const q of session.pendingQuestions) {
+      clearTimeout(q.timeoutId);
+      q.resolve({ behavior: "deny", message: reason });
+    }
+    session.pendingQuestions = [];
+    if (session.pendingPlanApproval) {
+      clearTimeout(session.pendingPlanApproval.timeoutId);
+      session.pendingPlanApproval.resolve({ behavior: "deny", message: reason });
+      session.pendingPlanApproval = null;
+    }
+  }
+
+  private pushMessage(session: AgentSession, msg: AgentMessage): void {
+    session.messages.push(msg);
+    session.messages = trimMessageWindow(session.messages);
+  }
+
+  private resumeIfNoPending(session: AgentSession): void {
+    if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
+      session.status = "streaming";
+    }
+  }
+
   stopAgent(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -640,22 +651,7 @@ export class AgentManager {
       this.queries.delete(sessionId);
     }
 
-    // Resolve all pending promises so the SDK is not left blocked
-    for (const perm of session.pendingPermissions.values()) {
-      clearTimeout(perm.timeoutId);
-      perm.resolve({ behavior: "deny", message: "Agent stopped" });
-    }
-    session.pendingPermissions.clear();
-    for (const q of session.pendingQuestions) {
-      clearTimeout(q.timeoutId);
-      q.resolve({ behavior: "deny", message: "Agent stopped" });
-    }
-    session.pendingQuestions = [];
-    if (session.pendingPlanApproval) {
-      clearTimeout(session.pendingPlanApproval.timeoutId);
-      session.pendingPlanApproval.resolve({ behavior: "deny", message: "Agent stopped" });
-      session.pendingPlanApproval = null;
-    }
+    this.resolveAllPending(session, "Agent stopped");
 
     // Clear persist timers
     const timer = this.persistTimers.get(sessionId);
@@ -696,21 +692,7 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
-    // Resolve all pending promises so the SDK is not left blocked
-    for (const perm of session.pendingPermissions.values()) {
-      clearTimeout(perm.timeoutId);
-      perm.resolve({ behavior: "deny", message: "Session dismissed" });
-    }
-    session.pendingPermissions.clear();
-    for (const q of session.pendingQuestions) {
-      clearTimeout(q.timeoutId);
-      q.resolve({ behavior: "deny", message: "Session dismissed" });
-    }
-    session.pendingQuestions = [];
-    if (session.pendingPlanApproval) {
-      clearTimeout(session.pendingPlanApproval.timeoutId);
-      session.pendingPlanApproval.resolve({ behavior: "deny", message: "Session dismissed" });
-    }
+    this.resolveAllPending(session, "Session dismissed");
 
     const controller = this.abortControllers.get(sessionId);
     if (controller) controller.abort();
@@ -973,8 +955,7 @@ export class AgentManager {
           rawResponse,
         };
 
-        session.messages.push(agentMsg);
-        session.messages = trimMessageWindow(session.messages);
+        this.pushMessage(session, agentMsg);
         this.persistSession(sessionId);
         this.fireOnMessage(agentMsg, session);
         this.fireOnSessionChange();
@@ -1010,8 +991,7 @@ export class AgentManager {
             numTurns: msg.num_turns,
             isError: false,
           };
-          session.messages.push(agentMsg);
-          session.messages = trimMessageWindow(session.messages);
+          this.pushMessage(session, agentMsg);
           this.persistSession(sessionId, true);
           this.fireOnMessage(agentMsg, session);
         } else {
@@ -1023,8 +1003,7 @@ export class AgentManager {
             text: (msg as SDKResultErrorMessage).error ?? "Agent ended with error",
             isError: true,
           };
-          session.messages.push(agentMsg);
-          session.messages = trimMessageWindow(session.messages);
+          this.pushMessage(session, agentMsg);
           this.persistSession(sessionId, true);
           this.fireOnMessage(agentMsg, session);
         }
@@ -1081,11 +1060,7 @@ export class AgentManager {
       const timeoutId = setTimeout(() => {
         if (settled) return;
         session.pendingPermissions.delete(toolUseId);
-
-        // Only change status if no more pending permissions/questions/plan approvals
-        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
-          session.status = "streaming";
-        }
+        this.resumeIfNoPending(session);
 
         // Update the inline permission message to show timed out state
         const permMsg = session.messages.find(m => m.id === `perm-${toolUseId}`);
@@ -1117,8 +1092,7 @@ export class AgentManager {
         sessionId,
         permissionData: { toolName, toolInput: input, toolUseId },
       };
-      session.messages.push(permMsg);
-      session.messages = trimMessageWindow(session.messages);
+      this.pushMessage(session, permMsg);
       this.fireOnMessage(permMsg, session);
     });
   }
@@ -1160,9 +1134,7 @@ export class AgentManager {
         if (idx !== -1) {
           session.pendingQuestions.splice(idx, 1);
         }
-        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0 && !session.pendingPlanApproval) {
-          session.status = "streaming";
-        }
+        this.resumeIfNoPending(session);
 
         // Update the inline question message to show timed out state
         const qMsg = session.messages.find(m => m.id === `q-${toolUseId}`);
@@ -1194,8 +1166,7 @@ export class AgentManager {
         sessionId: session.id,
         questionData: { questions, originalInput: input },
       };
-      session.messages.push(qMsg);
-      session.messages = trimMessageWindow(session.messages);
+      this.pushMessage(session, qMsg);
       this.fireOnMessage(qMsg, session);
     });
   }
@@ -1265,8 +1236,7 @@ export class AgentManager {
         sessionId: session.id,
         planApprovalData: { allowedPrompts, toolUseId, planContent },
       };
-      session.messages.push(planMsg);
-      session.messages = trimMessageWindow(session.messages);
+      this.pushMessage(session, planMsg);
       this.fireOnMessage(planMsg, session);
     });
   }

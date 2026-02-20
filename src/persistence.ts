@@ -13,69 +13,22 @@ export async function ensureDataDir(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
 }
 
-function serializeMessage(msg: AgentMessage): PersistedMessage {
-  return {
-    id: msg.id,
-    type: msg.type,
-    timestamp: msg.timestamp.toISOString(),
-    contentBlocks: msg.contentBlocks,
-    text: msg.text,
-    userText: msg.userText,
-    durationMs: msg.durationMs,
-    costUsd: msg.costUsd,
-    inputTokens: msg.inputTokens,
-    outputTokens: msg.outputTokens,
-    isError: msg.isError,
-    numTurns: msg.numTurns,
-    sessionId: msg.sessionId,
-    permissionData: msg.permissionData,
-    questionData: msg.questionData,
-    planApprovalData: msg.planApprovalData,
-    attachments: msg.attachments,
-  };
+function serializeMessage(m: AgentMessage): PersistedMessage {
+  const { hookStatus, rawRequest, rawResponse, ...rest } = m;
+  return { ...rest, timestamp: m.timestamp.toISOString() };
 }
 
 function deserializeMessage(data: PersistedMessage): AgentMessage {
-  return {
-    id: data.id,
-    type: data.type,
-    timestamp: new Date(data.timestamp),
-    contentBlocks: data.contentBlocks,
-    text: data.text,
-    userText: data.userText,
-    durationMs: data.durationMs,
-    costUsd: data.costUsd,
-    inputTokens: data.inputTokens,
-    outputTokens: data.outputTokens,
-    isError: data.isError,
-    numTurns: data.numTurns,
-    sessionId: data.sessionId,
-    permissionData: data.permissionData,
-    questionData: data.questionData,
-    planApprovalData: data.planApprovalData,
-    attachments: data.attachments,
-  };
+  return { ...data, timestamp: new Date(data.timestamp) };
 }
 
 export function serializeSession(session: AgentSession): PersistedSession {
+  const { pendingPermissions, pendingQuestions, pendingPlanApproval, turnStartedAt, hooksRunning, messages, lastActivity, createdAt, ...rest } = session;
   return {
-    id: session.id,
-    sdkSessionId: session.sdkSessionId,
-    repoName: session.repoName,
-    cwd: session.cwd,
-    status: session.status,
-    lastMessagePreview: session.lastMessagePreview,
-    lastActivity: session.lastActivity.toISOString(),
-    createdAt: session.createdAt.toISOString(),
-    gitBranch: session.gitBranch,
-    totalCostUsd: session.totalCostUsd,
-    inputTokens: session.inputTokens,
-    outputTokens: session.outputTokens,
-    turnCount: session.turnCount,
-    model: session.model,
-    preset: session.preset,
-    permissionMode: session.permissionMode,
-    messages: session.messages.map(serializeMessage),
+    ...rest,
+    lastActivity: lastActivity.toISOString(),
+    createdAt: createdAt.toISOString(),
+    messages: messages.map(serializeMessage),
   };
 }
 
@@ -84,22 +37,10 @@ export function deserializeSession(data: PersistedSession): AgentSession {
   const transientStatuses = new Set(["streaming", "starting", "needs_input"]);
   const restoredStatus = transientStatuses.has(data.status) ? "idle" : (data.status ?? "idle");
   return {
-    id: data.id,
-    sdkSessionId: data.sdkSessionId,
-    repoName: data.repoName,
-    cwd: data.cwd,
+    ...data,
     status: restoredStatus,
-    lastMessagePreview: data.lastMessagePreview,
     lastActivity: new Date(data.lastActivity),
     createdAt: new Date(data.createdAt),
-    gitBranch: data.gitBranch,
-    totalCostUsd: data.totalCostUsd,
-    inputTokens: data.inputTokens,
-    outputTokens: data.outputTokens,
-    turnCount: data.turnCount,
-    model: data.model,
-    preset: data.preset,
-    permissionMode: data.permissionMode,
     pendingPermissions: new Map(),
     pendingQuestions: [],
     pendingPlanApproval: null,

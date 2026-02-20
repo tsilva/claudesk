@@ -1,5 +1,15 @@
-import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingPermission, PendingQuestion, PermissionMode } from "../types.ts";
+import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingQuestion, PermissionMode } from "../types.ts";
 import { renderMarkdown } from "../markdown.ts";
+
+function truncateJson(input: unknown, limit = 500): string {
+  let json: string;
+  try {
+    json = JSON.stringify(input, null, 2);
+  } catch {
+    return "[Unable to display]";
+  }
+  return json.length > limit ? json.slice(0, limit) + "\n..." : json;
+}
 
 // --- Permission Mode ---
 
@@ -228,38 +238,6 @@ export function renderSessionStats(session: AgentSession): string {
   </div>`;
 }
 
-// --- Permission Prompt ---
-
-export function renderPermissionPrompt(permission: PendingPermission, sessionId: string): string {
-  let inputPreview: string;
-  try {
-    inputPreview = JSON.stringify(permission.toolInput, null, 2);
-  } catch {
-    inputPreview = "[Unable to display]";
-  }
-  const displayInput = inputPreview.length > 500
-    ? inputPreview.slice(0, 500) + "\n..."
-    : inputPreview;
-  const preview = getToolPreview(permission.toolName, permission.toolInput);
-
-  return `<div class="permission-prompt">
-    <div class="permission-prompt-header">
-      <span class="permission-prompt-icon">?</span>
-      <span class="permission-prompt-title">Permission Required</span>
-    </div>
-    <div class="permission-prompt-tool">
-      <span class="tool-icon">$</span>
-      <span class="tool-name">${escapeHtml(permission.toolName)}</span>
-      ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
-    </div>
-    <pre class="permission-prompt-input">${escapeHtml(displayInput)}</pre>
-    <div class="permission-prompt-actions">
-      <button class="btn btn--primary" onclick="approvePermission('${escapeJs(sessionId)}', '${escapeJs(permission.toolUseId)}')">Allow</button>
-      <button class="btn" onclick="denyPermission('${escapeJs(sessionId)}', '${escapeJs(permission.toolUseId)}')">Deny</button>
-    </div>
-  </div>`;
-}
-
 // --- Question Prompt ---
 
 export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string, msgId?: string): string {
@@ -275,17 +253,11 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
     const msgIdAttr = msgId ? ` data-msg-id="${escapeHtml(msgId)}"` : "";
     for (const opt of q.options) {
       const dataAttrs = `data-session="${escapeHtml(sessionId)}" data-question="${escapeHtml(q.question)}" data-label="${escapeHtml(opt.label)}" data-index="${qIndex}"${msgIdAttr}`;
-      if (q.multiSelect) {
-        optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="toggleQuestionOption(this)">
+      const onclick = q.multiSelect ? "toggleQuestionOption(this)" : "selectQuestionOption(this)";
+      optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="${onclick}">
           <span class="question-option-label">${escapeHtml(opt.label)}</span>
           ${opt.description ? `<span class="question-option-desc">${escapeHtml(opt.description)}</span>` : ""}
         </button>`;
-      } else {
-        optionsHtml += `<button type="button" class="question-option" ${dataAttrs} onclick="selectQuestionOption(this)">
-          <span class="question-option-label">${escapeHtml(opt.label)}</span>
-          ${opt.description ? `<span class="question-option-desc">${escapeHtml(opt.description)}</span>` : ""}
-        </button>`;
-      }
     }
 
     // "Other" free-text input (always rendered per SDK spec)
@@ -312,7 +284,7 @@ export function renderQuestionPrompt(pending: PendingQuestion, sessionId: string
 
   return `<div class="question-prompt">
     <div class="question-prompt-header">
-      <span class="question-prompt-icon">?</span>
+      <span class="prompt-icon question-prompt-icon">?</span>
       <span class="question-prompt-title">Question</span>
     </div>
     ${questionsHtml}
@@ -361,28 +333,20 @@ function renderPermissionMessage(msg: AgentMessage): string {
         <span class="tool-icon">$</span>
         <span class="tool-name">${escapeHtml(pd.toolName)}</span>
         ${preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : ""}
-        <span class="permission-badge ${badgeClass}">${label}</span>
+        <span class="badge badge--uppercase ${badgeClass}">${label}</span>
       </div>
     </div>`;
   }
 
   // Pending: full permission prompt inline
-  let inputPreview: string;
-  try {
-    inputPreview = JSON.stringify(pd.toolInput, null, 2);
-  } catch {
-    inputPreview = "[Unable to display]";
-  }
-  const displayInput = inputPreview.length > 500
-    ? inputPreview.slice(0, 500) + "\n..."
-    : inputPreview;
+  const displayInput = truncateJson(pd.toolInput);
   const preview = getToolPreview(pd.toolName, pd.toolInput as Record<string, any>);
 
   return `<div class="message message--permission" id="${msg.id}" data-id="${msg.id}">
     <div class="message-content">
       <div class="permission-prompt permission-prompt--inline">
         <div class="permission-prompt-header">
-          <span class="permission-prompt-icon">?</span>
+          <span class="prompt-icon permission-prompt-icon">?</span>
           <span class="permission-prompt-title">Permission Required</span>
         </div>
         <div class="permission-prompt-tool">
@@ -425,7 +389,7 @@ function renderQuestionMessage(msg: AgentMessage): string {
       }
     }
 
-    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}"><div class="message-content"><details class="question-resolved-details"><summary class="question-resolved-summary"><span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span><span class="question-resolved-text">${escapeHtml(firstQ)}</span><span class="question-badge ${badgeClass}">${escapeHtml(label + summary)}</span></summary>${expandedContent ? `<div class="question-resolved-content">${expandedContent}</div>` : ""}</details></div></div>`;
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}"><div class="message-content"><details class="question-resolved-details"><summary class="resolved-summary question-resolved-summary"><span class="prompt-icon question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span><span class="question-resolved-text">${escapeHtml(firstQ)}</span><span class="badge ${badgeClass}">${escapeHtml(label + summary)}</span></summary>${expandedContent ? `<div class="question-resolved-content">${expandedContent}</div>` : ""}</details></div></div>`;
   }
 
   // Pending: full question prompt inline — reuse renderQuestionPrompt logic
@@ -463,17 +427,17 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
     // Build expanded content showing the plan without input buttons
     let expandedContent = "";
     if (pd.planContent) {
-      expandedContent += `<div class="plan-resolved-body markdown-body">${renderMarkdown(pd.planContent)}</div>`;
+      expandedContent += `<div class="plan-body markdown-body">${renderMarkdown(pd.planContent)}</div>`;
     }
     if (pd.allowedPrompts.length > 0) {
-      expandedContent += `<div class="plan-resolved-section-label">Requested permissions:</div><div class="plan-prompts-list">`;
+      expandedContent += `<div class="plan-section-label">Requested permissions:</div><div class="plan-prompts-list">`;
       for (const p of pd.allowedPrompts) {
         expandedContent += `<div class="plan-prompt-item">${escapeHtml(p.prompt)}</div>`;
       }
       expandedContent += `</div>`;
     }
 
-    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}"><div class="message-content"><details class="plan-resolved-details"><summary class="plan-resolved-summary"><span class="plan-approval-icon-sm">P</span><span class="plan-resolved-text">Plan Review</span><span class="plan-badge ${badgeClass}">${escapeHtml(label + feedback)}</span></summary>${expandedContent ? `<div class="plan-resolved-content">${expandedContent}</div>` : ""}</details></div></div>`;
+    return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}"><div class="message-content"><details class="plan-resolved-details"><summary class="resolved-summary plan-resolved-summary"><span class="prompt-icon plan-approval-icon-sm">P</span><span class="plan-resolved-text">Plan Review</span><span class="badge ${badgeClass}">${escapeHtml(label + feedback)}</span></summary>${expandedContent ? `<div class="plan-resolved-content">${expandedContent}</div>` : ""}</details></div></div>`;
   }
 
   // Pending: full plan approval prompt inline
@@ -487,18 +451,18 @@ function renderPlanApprovalMessage(msg: AgentMessage): string {
   }
 
   const planBodyHtml = pd.planContent
-    ? `<div class="plan-approval-body markdown-body">${renderMarkdown(pd.planContent)}</div>`
+    ? `<div class="plan-body markdown-body">${renderMarkdown(pd.planContent)}</div>`
     : "";
 
   return `<div class="message message--plan-approval" id="${msg.id}" data-id="${msg.id}">
     <div class="message-content">
       <div class="plan-approval-prompt">
         <div class="plan-approval-header">
-          <span class="plan-approval-icon">P</span>
+          <span class="prompt-icon plan-approval-icon">P</span>
           <span class="plan-approval-title">Plan Ready for Review</span>
         </div>
         ${planBodyHtml}
-        ${promptsHtml ? `<div class="plan-approval-section-label">Requested permissions:</div>${promptsHtml}` : ""}
+        ${promptsHtml ? `<div class="plan-section-label">Requested permissions:</div>${promptsHtml}` : ""}
         <div class="plan-approval-actions">
           <button class="btn btn--plan-accept" onclick="acceptPlan('${escapeJs(sid)}')">Accept</button>
           <input type="text" class="plan-revise-input" id="plan-revise-input-${escapeHtml(pd.toolUseId)}" placeholder="Revision feedback..." onkeydown="if(event.key==='Enter'){event.preventDefault();revisePlan('${escapeJs(sid)}')}">
@@ -522,17 +486,11 @@ function renderUserMessage(msg: AgentMessage): string {
         attachmentsHtml += `<div class="attachment attachment--image" onclick="openImageLightbox('${escapeJs(att.data)}')">
           <img src="data:${escapeHtml(att.type)};base64,${escapeHtml(att.data)}" alt="${escapeHtml(att.name)}">
         </div>`;
-      } else if (att.type === "application/pdf") {
-        const sizeKb = Math.round(att.size / 1024);
-        attachmentsHtml += `<div class="attachment attachment--file attachment--pdf">
-          <span class="attachment-file-icon">📑</span>
-          <span class="attachment-file-name">${escapeHtml(att.name)}</span>
-          <span class="attachment-file-size">${sizeKb} KB</span>
-        </div>`;
       } else {
+        const isPdf = att.type === "application/pdf";
         const sizeKb = Math.round(att.size / 1024);
-        attachmentsHtml += `<div class="attachment attachment--file">
-          <span class="attachment-file-icon">📄</span>
+        attachmentsHtml += `<div class="attachment attachment--file${isPdf ? " attachment--pdf" : ""}">
+          <span class="attachment-file-icon">${isPdf ? "📑" : "📄"}</span>
           <span class="attachment-file-name">${escapeHtml(att.name)}</span>
           <span class="attachment-file-size">${sizeKb} KB</span>
         </div>`;
@@ -581,14 +539,7 @@ function renderContentBlock(block: ContentBlock): string {
 
     case "tool_use": {
       const name = block.toolName ?? "Unknown tool";
-      let rawJson = "";
-      if (block.toolInput) {
-        try {
-          rawJson = JSON.stringify(block.toolInput, null, 2);
-        } catch {
-          rawJson = "[Unable to display]";
-        }
-      }
+      const rawJson = block.toolInput ? truncateJson(block.toolInput) : "";
 
       if (isTaskTool(name)) {
         return renderTaskToolUse(name, block.toolInput as Record<string, any>, rawJson);

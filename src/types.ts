@@ -210,65 +210,14 @@ export interface SDKResultErrorMessage {
 
 // --- Persisted types (serializable to JSON) ---
 
-export interface PersistedMessage {
-  id: string;
-  type: "user" | "assistant" | "system" | "result";
-  timestamp: string; // ISO 8601
-  contentBlocks?: ContentBlock[];
-  text?: string;
-  userText?: string;
-  durationMs?: number;
-  costUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  isError?: boolean;
-  numTurns?: number;
-  sessionId?: string;
-  permissionData?: {
-    toolName: string;
-    toolInput: Record<string, unknown>;
-    toolUseId: string;
-    resolved?: "allowed" | "denied" | "timed_out";
-  };
-  questionData?: {
-    questions: QuestionItem[];
-    originalInput: Record<string, unknown>;
-    resolved?: "answered" | "timed_out";
-    answerSummary?: string;
-    answers?: Record<string, string>;
-  };
-  planApprovalData?: {
-    allowedPrompts: { tool: "Bash"; prompt: string }[];
-    toolUseId: string;
-    planContent?: string;
-    resolved?: "accepted" | "revised" | "timed_out";
-    reviseFeedback?: string;
-  };
-  attachments?: Attachment[];
-  rawRequest?: unknown;
-  rawResponse?: unknown;
-}
+// Transient fields excluded from persistence
+export type PersistedMessage = Omit<AgentMessage, 'timestamp' | 'hookStatus' | 'rawRequest' | 'rawResponse'> & { timestamp: string };
 
-export interface PersistedSession {
-  id: string;
-  sdkSessionId: string;
-  repoName: string;
-  cwd: string;
-  status: AgentStatus;
-  lastMessagePreview: string;
-  lastActivity: string; // ISO 8601
-  createdAt: string; // ISO 8601
-  gitBranch: string;
-  totalCostUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  turnCount: number;
-  model: string;
-  preset?: ModelPreset;
-  permissionMode: PermissionMode;
+export type PersistedSession = Omit<AgentSession, 'lastActivity' | 'createdAt' | 'turnStartedAt' | 'hooksRunning' | 'pendingPermissions' | 'pendingQuestions' | 'pendingPlanApproval' | 'messages'> & {
+  lastActivity: string;
+  createdAt: string;
   messages: PersistedMessage[];
-  logoUrl?: string;
-}
+};
 
 // --- Launchable Repos ---
 

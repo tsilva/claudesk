@@ -21,6 +21,16 @@
   }
 
 
+  // --- Helpers ---
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
   // --- Notifications ---
 
   window.toggleNotifications = function () {
@@ -113,11 +123,7 @@
         });
 
         n.onclick = function () {
-          fetch("/api/focus-dashboard", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId: data.sessionId || null }),
-          }).then(function () {
+          postJson("/api/focus-dashboard", { sessionId: data.sessionId || null }).then(function () {
             if (data.sessionId) {
               switchSession(data.sessionId, { skipEditorFocus: true });
             }
@@ -405,18 +411,8 @@
 
   // --- Agent Interaction ---
 
-  var MODEL_PRESETS = {
-    opus: { label: "Opus", description: "Powerful — best for complex tasks", model: "claude-opus-4-6", permissionMode: "default" },
-    sonnet: { label: "Sonnet", description: "Fast & capable — great for most tasks", model: "claude-sonnet-4-6", permissionMode: "default" },
-    "opus-plan": { label: "Opus Plan", description: "Plans with Opus, executes with Sonnet", model: "claude-opus-4-6", permissionMode: "plan" },
-  };
-
   window.createSession = function (cwd) {
-    fetch("/api/agents/launch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cwd: cwd }),
-    })
+    postJson("/api/agents/launch", { cwd: cwd })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data.sessionId) {
@@ -496,11 +492,7 @@
   });
 
   window.updateSessionModel = function (sessionId, model) {
-    fetch("/api/agents/" + sessionId + "/model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model }),
-    })
+    postJson("/api/agents/" + sessionId + "/model", { model: model })
       .then(function (res) {
         if (res.ok) {
           // Refresh the session stats to show new model
@@ -690,12 +682,6 @@
     }
   }
 
-  function escapeHtml(text) {
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
   window.sendMessage = function (event, sessionId) {
     event.preventDefault();
     var form = event.target;
@@ -770,13 +756,8 @@
   window.approvePermission = function (sessionId, toolUseId) {
     seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
-    fetch("/api/agents/" + sessionId + "/permission", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allow: true, toolUseId: toolUseId }),
-    }).catch(function () {
-      removeTypingIndicator();
-    });
+    postJson("/api/agents/" + sessionId + "/permission", { allow: true, toolUseId: toolUseId })
+      .catch(function () { removeTypingIndicator(); });
   };
 
   window.showDenyInput = function (sessionId, toolUseId, btn) {
@@ -792,18 +773,8 @@
     var message = inputEl ? inputEl.value.trim() : "";
     seenNotifications.delete("permission:" + sessionId);
     showTypingIndicator();
-    fetch("/api/agents/" + sessionId + "/permission", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allow: false, message: message || "User denied", toolUseId: toolUseId }),
-    }).catch(function () {
-      removeTypingIndicator();
-    });
-  };
-
-  window.denyPermission = function (sessionId, toolUseId) {
-    // Legacy fallback — should not be called since deny button now uses showDenyInput
-    confirmDeny(sessionId, toolUseId, null);
+    postJson("/api/agents/" + sessionId + "/permission", { allow: false, message: message || "User denied", toolUseId: toolUseId })
+      .catch(function () { removeTypingIndicator(); });
   };
 
   // --- Question Interaction ---
@@ -911,17 +882,12 @@
       }
 
       el.className = 'message message--system';
-      el.innerHTML = '<div class="message-content"><details class="question-resolved-details"><summary class="question-resolved-summary"><span class="question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span><span class="question-resolved-text">' + escapeHtmlClient(firstQ) + '</span><span class="question-badge question-badge--answered">' + escapeHtmlClient(badgeText) + '</span></summary>' + (expandedContent ? '<div class="question-resolved-content">' + expandedContent + '</div>' : '') + '</details></div>';
+      el.innerHTML = '<div class="message-content"><details class="question-resolved-details"><summary class="resolved-summary question-resolved-summary"><span class="prompt-icon question-prompt-icon" style="width:16px;height:16px;font-size:10px;">?</span><span class="question-resolved-text">' + escapeHtmlClient(firstQ) + '</span><span class="badge question-badge--answered">' + escapeHtmlClient(badgeText) + '</span></summary>' + (expandedContent ? '<div class="question-resolved-content">' + expandedContent + '</div>' : '') + '</details></div>';
     });
 
     showTypingIndicator();
-    fetch("/api/agents/" + sessionId + "/answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolUseId: toolUseId, answers: answers }),
-    }).catch(function () {
-      removeTypingIndicator();
-    });
+    postJson("/api/agents/" + sessionId + "/answer", { toolUseId: toolUseId, answers: answers })
+      .catch(function () { removeTypingIndicator(); });
   };
 
   // --- Plan Approval Interaction ---
@@ -929,13 +895,8 @@
   window.acceptPlan = function (sessionId) {
     seenNotifications.delete("plan_approval:" + sessionId);
     showTypingIndicator();
-    fetch("/api/agents/" + sessionId + "/plan-approval", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accept: true }),
-    }).catch(function () {
-      removeTypingIndicator();
-    });
+    postJson("/api/agents/" + sessionId + "/plan-approval", { accept: true })
+      .catch(function () { removeTypingIndicator(); });
   };
 
   window.revisePlan = function (sessionId) {
@@ -947,13 +908,8 @@
     }
     seenNotifications.delete("plan_approval:" + sessionId);
     showTypingIndicator();
-    fetch("/api/agents/" + sessionId + "/plan-approval", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accept: false, feedback: feedback }),
-    }).catch(function () {
-      removeTypingIndicator();
-    });
+    postJson("/api/agents/" + sessionId + "/plan-approval", { accept: false, feedback: feedback })
+      .catch(function () { removeTypingIndicator(); });
   };
 
   window.copyCode = function (btn) {
@@ -982,10 +938,8 @@
   };
 
   window.stopAgent = function (sessionId) {
-    fetch("/api/agents/" + sessionId + "/stop", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    }).catch(function (err) { console.warn("Stop agent failed:", err); });
+    postJson("/api/agents/" + sessionId + "/stop")
+      .catch(function (err) { console.warn("Stop agent failed:", err); });
   };
 
   window.focusEditor = function (sessionId) {
@@ -1075,28 +1029,41 @@
     scrollToNewest(container);
   }
 
-  // --- Finishing Indicator (shown while stop hooks run after model reply) ---
+  // --- Indicators (typing / finishing) ---
 
-  function showFinishingIndicator() {
+  function createIndicator(id, cls, html) {
     var container = document.getElementById("conversation-stream");
     if (!container) return;
-    removeFinishingIndicator();
+    removeIndicator(id);
     var indicator = document.createElement("div");
-    indicator.className = "finishing-indicator";
-    indicator.id = "finishing-indicator";
-    indicator.innerHTML =
-      '<span class="finishing-indicator-text">Finishing up</span>' +
-      '<span class="finishing-indicator-dot"></span>' +
-      '<span class="finishing-indicator-dot"></span>' +
-      '<span class="finishing-indicator-dot"></span>';
+    indicator.className = cls;
+    indicator.id = id;
+    indicator.innerHTML = html;
     container.appendChild(indicator);
     scrollToNewest(container);
   }
 
-  function removeFinishingIndicator() {
-    var indicator = document.getElementById("finishing-indicator");
+  function removeIndicator(id) {
+    var indicator = document.getElementById(id);
     if (indicator) indicator.remove();
   }
+
+  function showTypingIndicator() {
+    createIndicator("typing-indicator", "typing-indicator",
+      '<div class="typing-indicator-dot"></div>' +
+      '<div class="typing-indicator-dot"></div>' +
+      '<div class="typing-indicator-dot"></div>');
+  }
+  function removeTypingIndicator() { removeIndicator("typing-indicator"); }
+
+  function showFinishingIndicator() {
+    createIndicator("finishing-indicator", "finishing-indicator",
+      '<span class="finishing-indicator-text">Finishing up</span>' +
+      '<span class="finishing-indicator-dot"></span>' +
+      '<span class="finishing-indicator-dot"></span>' +
+      '<span class="finishing-indicator-dot"></span>');
+  }
+  function removeFinishingIndicator() { removeIndicator("finishing-indicator"); }
 
   // Handle hook-status SSE events
   document.body.addEventListener("htmx:sseMessage", function (e) {
@@ -1109,29 +1076,6 @@
       // ignore parse errors
     }
   });
-
-  // --- Typing Indicator ---
-
-  function showTypingIndicator() {
-    var container = document.getElementById("conversation-stream");
-    if (!container) return;
-    // Remove any existing indicator first
-    removeTypingIndicator();
-    var indicator = document.createElement("div");
-    indicator.className = "typing-indicator";
-    indicator.id = "typing-indicator";
-    indicator.innerHTML =
-      '<div class="typing-indicator-dot"></div>' +
-      '<div class="typing-indicator-dot"></div>' +
-      '<div class="typing-indicator-dot"></div>';
-    container.appendChild(indicator);
-    scrollToNewest(container);
-  }
-
-  function removeTypingIndicator() {
-    var indicator = document.getElementById("typing-indicator");
-    if (indicator) indicator.remove();
-  }
 
   // Remove typing indicator when first agent response arrives (skip user messages)
   // Also scroll to top when new content arrives (unless user is actively scrolling)

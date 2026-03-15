@@ -10,6 +10,7 @@
   var isUserScrolling = false;
   var scrollTimeout = null;
   var isProgrammaticScroll = false;
+  var notificationBannerTimer = null;
 
   function scrollToNewest(container) {
     if (!container) return;
@@ -29,6 +30,39 @@
       headers: { "Content-Type": "application/json" },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+  }
+
+  function showNotificationBanner(message, level, timeoutMs) {
+    var banner = document.getElementById("notification-banner");
+    if (!banner || !message) return;
+    banner.textContent = message;
+    banner.classList.remove("hidden", "notification--success", "notification--warning", "notification--error");
+    banner.classList.add("notification--" + (level || "success"));
+    if (notificationBannerTimer) {
+      clearTimeout(notificationBannerTimer);
+    }
+    notificationBannerTimer = setTimeout(function () {
+      banner.classList.add("hidden");
+      banner.classList.remove("notification--success", "notification--warning", "notification--error");
+      notificationBannerTimer = null;
+    }, timeoutMs || 5000);
+  }
+
+  async function readErrorResponse(res) {
+    var fallback = res.statusText || "Request failed";
+    try {
+      var contentType = res.headers.get("content-type") || "";
+      if (contentType.indexOf("application/json") >= 0) {
+        var data = await res.json();
+        if (data && typeof data.error === "string" && data.error.trim()) {
+          return data.error.trim();
+        }
+      }
+      var text = (await res.text()).trim();
+      return text || fallback;
+    } catch (_) {
+      return fallback;
+    }
   }
 
   // --- Notifications ---
@@ -427,7 +461,10 @@
 
   window.createSession = function (cwd) {
     postJson("/api/agents/launch", { cwd: cwd })
-      .then(function (res) { return res.json(); })
+      .then(async function (res) {
+        if (!res.ok) throw new Error(await readErrorResponse(res));
+        return res.json();
+      })
       .then(function (data) {
         if (data.sessionId) {
           switchSession(data.sessionId);
@@ -436,14 +473,54 @@
       })
       .catch(function (err) {
         console.error("Create session failed:", err);
+        showNotificationBanner(err instanceof Error ? err.message : "Failed to create session", "error");
       });
   };
 
-  // --- Model Selector Popup ---
+  // --- Model Selector Modal ---
 
-  var activeModelPicker = null;
+  var activeModelPickerSessionId = null;
+  var lastModelPickerTrigger = null;
   var modelCatalogPromise = null;
   var modelCatalogCache = null;
+
+  function getModelModal() {
+    return document.getElementById("model-modal");
+  }
+
+  function getModelModalContent() {
+    return document.getElementById("model-modal-content");
+  }
+
+  function getModelModalSessionText(sessionId) {
+    var detail = document.querySelector('.session-detail[data-session-id="' + sessionId + '"]');
+    if (!detail) return "New session";
+    var repo = detail.querySelector(".session-header-repo");
+    var slug = detail.querySelector(".session-header-slug");
+    return (repo ? repo.textContent.trim() : "Session") + (slug ? " · " + slug.textContent.trim() : "");
+  }
+
+  function getCurrentModelSelection(trigger) {
+    if (!trigger) return { model: "", providerId: "", label: "" };
+    return {
+      model: trigger.getAttribute("data-current-model") || "",
+      providerId: trigger.getAttribute("data-current-provider-id") || "",
+      label: (trigger.textContent || "").trim(),
+    };
+  }
+
+  function setModelModalMeta(sessionId, currentSelection) {
+    var sessionEl = document.getElementById("model-modal-session");
+    var currentEl = document.getElementById("model-modal-current");
+    if (sessionEl) {
+      sessionEl.textContent = getModelModalSessionText(sessionId);
+    }
+    if (currentEl) {
+      currentEl.textContent = currentSelection.label
+        ? "Current: " + currentSelection.label
+        : "Current: Default OpenCode model";
+    }
+  }
 
   function loadModelCatalog() {
     if (modelCatalogCache) {
@@ -471,22 +548,34 @@
     return modelCatalogPromise;
   }
 
-  function createModelOption(sessionId, model) {
+  function createModelOption(sessionId, model, currentSelection) {
     var opt = document.createElement("button");
     opt.className = "model-picker-option";
     opt.type = "button";
+    var isSelected = currentSelection
+      && currentSelection.model === model.model
+      && (currentSelection.providerId || "") === (model.providerId || "");
+    if (isSelected) {
+      opt.classList.add("is-selected");
+    }
+    var providerHtml = model.providerId
+      ? '<span class="model-picker-provider">' + escapeHtmlClient(model.providerId) + '</span>'
+      : "";
     opt.innerHTML =
-      '<span class="model-picker-label">' + escapeHtmlClient(model.label) + '</span>' +
+      '<span class="model-picker-topline">' +
+        '<span class="model-picker-label">' + escapeHtmlClient(model.label) + '</span>' +
+        providerHtml +
+      '</span>' +
       '<span class="model-picker-desc">' + escapeHtmlClient(model.description) + '</span>';
     opt.onclick = function (e) {
       e.stopPropagation();
-      dismissModelPicker();
       updateSessionModel(sessionId, model);
+      dismissModelPicker();
     };
     return opt;
   }
 
-  function appendModelSection(popover, title, models, sessionId) {
+  function appendModelSection(container, title, models, sessionId, currentSelection) {
     if (!models || models.length === 0) return;
 
     var section = document.createElement("div");
@@ -498,71 +587,77 @@
     section.appendChild(heading);
 
     models.forEach(function (model) {
-      section.appendChild(createModelOption(sessionId, model));
+      section.appendChild(createModelOption(sessionId, model, currentSelection));
     });
 
-    popover.appendChild(section);
+    container.appendChild(section);
   }
 
-  function renderModelPicker(popover, sessionId, catalog) {
-    popover.innerHTML = "";
-    appendModelSection(popover, "Claude SDK", catalog.claude || [], sessionId);
-    appendModelSection(popover, "OpenCode SDK", catalog.opencode || [], sessionId);
+  function renderModelPicker(container, sessionId, catalog, currentSelection) {
+    container.innerHTML = "";
+    appendModelSection(container, "OpenCode SDK", catalog.opencode || [], sessionId, currentSelection);
 
     if (catalog.opencodeError) {
       var note = document.createElement("div");
-      note.className = "model-picker-note";
+      note.className = "model-modal-note";
       note.textContent = "OpenCode unavailable: " + catalog.opencodeError;
-      popover.appendChild(note);
+      container.appendChild(note);
     }
 
-    if (!popover.children.length) {
+    if (!container.children.length) {
       var empty = document.createElement("div");
-      empty.className = "model-picker-note";
+      empty.className = "model-modal-note";
       empty.textContent = "No models available";
-      popover.appendChild(empty);
+      container.appendChild(empty);
     }
   }
 
   window.showModelPicker = function (event, sessionId) {
     event.stopPropagation();
-    dismissModelPicker();
-
     var trigger = event.target && event.target.closest ? event.target.closest("[data-action='show-model-picker']") : event.target;
-    var rect = trigger.getBoundingClientRect();
+    var modal = getModelModal();
+    var content = getModelModalContent();
+    var currentSelection = getCurrentModelSelection(trigger);
+    if (!modal || !content) return;
 
-    var popover = document.createElement("div");
-    popover.className = "model-picker-popover";
-    popover.style.position = "fixed";
-    popover.style.bottom = (window.innerHeight - rect.top + 4) + "px";
-    popover.style.left = rect.left + "px";
-    popover.style.zIndex = "9999";
-    popover.innerHTML = '<div class="model-picker-note">Loading models...</div>';
-
-    document.body.appendChild(popover);
-    activeModelPicker = popover;
+    activeModelPickerSessionId = sessionId;
+    lastModelPickerTrigger = trigger || null;
+    setModelModalMeta(sessionId, currentSelection);
+    content.innerHTML = '<div class="model-modal-note">Loading models...</div>';
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("model-modal-open");
+    requestAnimationFrame(function () {
+      modal.classList.add("is-open");
+    });
 
     loadModelCatalog()
       .then(function (catalog) {
-        if (activeModelPicker !== popover) return;
-        renderModelPicker(popover, sessionId, catalog);
+        if (activeModelPickerSessionId !== sessionId) return;
+        renderModelPicker(content, sessionId, catalog, currentSelection);
       })
       .catch(function (err) {
-        if (activeModelPicker !== popover) return;
-        popover.innerHTML = '<div class="model-picker-note">Failed to load models</div>';
+        if (activeModelPickerSessionId !== sessionId) return;
+        content.innerHTML = '<div class="model-modal-note">Failed to load models</div>';
         console.error("Load models failed:", err);
       });
   };
 
   function dismissModelPicker() {
-    if (activeModelPicker) {
-      activeModelPicker.remove();
-      activeModelPicker = null;
+    var modal = getModelModal();
+    if (!modal) return;
+    modal.classList.remove("is-open");
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("model-modal-open");
+    activeModelPickerSessionId = null;
+    if (lastModelPickerTrigger && typeof lastModelPickerTrigger.focus === "function") {
+      lastModelPickerTrigger.focus();
     }
+    lastModelPickerTrigger = null;
   }
 
   document.addEventListener("click", function (e) {
-    // Handle model picker click via event delegation
     var target = e.target && e.target.closest ? e.target.closest("[data-action='show-model-picker']") : null;
     if (target) {
       var sessionId = target.getAttribute("data-session-id");
@@ -572,23 +667,31 @@
         return;
       }
     }
-    dismissModelPicker();
+    var dismissTarget = e.target && e.target.closest ? e.target.closest("[data-action='dismiss-model-modal']") : null;
+    if (dismissTarget) {
+      dismissModelPicker();
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && activeModelPickerSessionId) {
+      dismissModelPicker();
+    }
   });
 
   window.updateSessionModel = function (sessionId, model) {
     postJson("/api/agents/" + sessionId + "/model", {
-      backend: model.backend,
       model: model.model,
       modelProviderId: model.providerId
     })
-      .then(function (res) {
-        if (res.ok) {
-          // Refresh the session stats to show new model
-          htmx.ajax("GET", "/sessions/" + sessionId + "/detail", "#session-detail");
-        }
+      .then(async function (res) {
+        if (!res.ok) throw new Error(await readErrorResponse(res));
+        // Refresh the session stats to show new model
+        htmx.ajax("GET", "/sessions/" + sessionId + "/detail", "#session-detail");
       })
       .catch(function (err) {
         console.error("Update model failed:", err);
+        showNotificationBanner(err instanceof Error ? err.message : "Failed to update model", "error");
       });
   };
 
@@ -812,8 +915,8 @@
       headers: headers,
       body: body,
     })
-      .then(function (res) {
-        if (!res.ok) throw new Error(res.statusText || "Send failed");
+      .then(async function (res) {
+        if (!res.ok) throw new Error(await readErrorResponse(res));
         if (input) input.value = "";
       })
       .catch(function (err) {
@@ -821,6 +924,7 @@
         removeTypingIndicator();
         var optimistic = document.getElementById("optimistic-user-msg");
         if (optimistic) optimistic.remove();
+        showNotificationBanner(err instanceof Error ? err.message : "Send failed", "error");
       })
       .finally(function () {
         if (input) { input.disabled = false; input.focus(); }
@@ -1178,6 +1282,9 @@
       temp.innerHTML = data;
       var root = temp.firstElementChild;
       var isUserMessage = root && root.classList.contains("message--user");
+      if (root && root.classList.contains("message--error")) {
+        showNotificationBanner((root.textContent || "").trim(), "error", 7000);
+      }
       if (!isUserMessage) {
         removeTypingIndicator();
         removeFinishingIndicator();

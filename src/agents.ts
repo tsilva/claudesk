@@ -1,4 +1,3 @@
-import { query, type Query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   createOpencodeClient,
   createOpencodeServer,
@@ -13,26 +12,13 @@ import {
 import { readdir, stat } from "fs/promises";
 import { join, basename } from "path";
 import type {
-  AgentBackend,
   AgentSession,
   AgentMessage,
-  AgentStatus,
   ContentBlock,
   LaunchableRepo,
   RepoGitStatus,
   PendingPermission,
-  PendingQuestion,
-  PendingPlanApproval,
-  QuestionItem,
-  PermissionResult,
   PermissionMode,
-  PermissionUpdate,
-  ModelPreset,
-  SDKThinkingBlock,
-  SDKToolResultBlock,
-  SDKSystemInitMessage,
-  SDKSystemHookMessage,
-  SDKResultErrorMessage,
 } from "./types.ts";
 import {
   ensureDataDir,
@@ -47,7 +33,6 @@ import { getReposDir, isRepoBlacklisted } from "./config.ts";
 const ARCHIVED_MARKER = ".archived.md";
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MESSAGE_WINDOW_LIMIT = 100; // Maximum messages to keep in memory per session
-const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6";
 const DEFAULT_OPENCODE_PROVIDER = "anthropic";
 const DEFAULT_OPENCODE_MODEL = "claude-sonnet-4-5";
 
@@ -60,45 +45,11 @@ type OpencodeRuntime = {
 };
 
 type ModelOption = {
-  backend: AgentBackend;
   model: string;
   label: string;
   description: string;
   providerId?: string;
 };
-
-const CLAUDE_MODEL_OPTIONS: ModelOption[] = [
-  {
-    backend: "claude",
-    model: "claude-opus-4-6",
-    label: "Opus 4.6",
-    description: "Powerful, direct Claude SDK session",
-  },
-  {
-    backend: "claude",
-    model: "claude-sonnet-4-6",
-    label: "Sonnet 4.6",
-    description: "Fast and capable for most work",
-  },
-  {
-    backend: "claude",
-    model: "claude-opus-4-5",
-    label: "Opus 4.5",
-    description: "Previous generation Opus model",
-  },
-  {
-    backend: "claude",
-    model: "claude-sonnet-4-5",
-    label: "Sonnet 4.5",
-    description: "Previous generation Sonnet model",
-  },
-  {
-    backend: "claude",
-    model: "claude-haiku-4-5-20251001",
-    label: "Haiku",
-    description: "Fastest Claude option for simple tasks",
-  },
-];
 
 // --- Git Helpers ---
 
@@ -156,26 +107,6 @@ function fireCallback(cb: () => void | Promise<void>, label: string): void {
   } catch (err) {
     console.warn(`[${label}] callback error:`, err);
   }
-}
-
-// --- Plan Mode Helpers ---
-
-function buildExitPlanPermissions(suggestions?: PermissionUpdate[]): PermissionUpdate[] {
-  const setModeDefault: PermissionUpdate = {
-    type: 'setMode',
-    mode: 'acceptEdits',
-    destination: 'session',
-  };
-
-  if (!suggestions || suggestions.length === 0) {
-    return [setModeDefault];
-  }
-
-  if (suggestions.some((s) => s.type === 'setMode')) {
-    return suggestions;
-  }
-
-  return [...suggestions, setModeDefault];
 }
 
 // --- Message Windowing Helper ---
@@ -238,13 +169,10 @@ function trimMessageWindow(messages: AgentMessage[]): AgentMessage[] {
 
 export class AgentManager {
   private sessions = new Map<string, AgentSession>();
-  private queries = new Map<string, Query>();
-  private abortControllers = new Map<string, AbortController>();
   private sdkSessionLookup = new Map<string, string>();
   private onMessage: MessageCallback;
   private onSessionChange: SessionChangeCallback;
   private launchableRepos: LaunchableRepo[] = [];
-  private lastBroadcast = new Map<string, number>();
   private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private cachedPendingCounts: Map<string, RepoGitStatus> = new Map();
   private opencodeRuntime: OpencodeRuntime | null = null;
@@ -252,6 +180,7 @@ export class AgentManager {
   private opencodeEventLoop: Promise<void> | null = null;
   private opencodeParts = new Map<string, OpenCodePart[]>();
   private opencodeMessageRoles = new Map<string, string>();
+  private opencodeErroredSessions = new Set<string>();
 
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
@@ -266,20 +195,16 @@ export class AgentManager {
     fireCallback(() => this.onSessionChange(this.getSessions()), "onSessionChange");
   }
 
-  private sdkLookupKey(backend: AgentBackend, sdkSessionId: string): string {
-    return `${backend}:${sdkSessionId}`;
-  }
-
   private setSdkSessionId(session: AgentSession, sdkSessionId: string): void {
     if (session.sdkSessionId) {
-      this.sdkSessionLookup.delete(this.sdkLookupKey(session.backend, session.sdkSessionId));
+      this.sdkSessionLookup.delete(session.sdkSessionId);
     }
     session.sdkSessionId = sdkSessionId;
-    this.sdkSessionLookup.set(this.sdkLookupKey(session.backend, sdkSessionId), session.id);
+    this.sdkSessionLookup.set(sdkSessionId, session.id);
   }
 
-  private getSessionBySdkSessionId(backend: AgentBackend, sdkSessionId: string): AgentSession | undefined {
-    const sessionId = this.sdkSessionLookup.get(this.sdkLookupKey(backend, sdkSessionId));
+  private getSessionBySdkSessionId(sdkSessionId: string): AgentSession | undefined {
+    const sessionId = this.sdkSessionLookup.get(sdkSessionId);
     return sessionId ? this.sessions.get(sessionId) : undefined;
   }
 
@@ -297,18 +222,16 @@ export class AgentManager {
     await this.scanLaunchableRepos();
     const restored = await loadAllSessions();
     for (const session of restored) {
-      session.backend = session.backend ?? "claude";
-      if (session.backend === "claude") {
-        this.lastUsedSelection.claude = { model: session.model };
-      } else {
-        this.lastUsedSelection.opencode = {
-          model: session.model || DEFAULT_OPENCODE_MODEL,
-          providerId: session.modelProviderId || DEFAULT_OPENCODE_PROVIDER,
-        };
-      }
+      session.backend = "opencode";
+      session.model = session.model || DEFAULT_OPENCODE_MODEL;
+      session.modelProviderId = session.modelProviderId || DEFAULT_OPENCODE_PROVIDER;
+      this.lastUsedSelection = {
+        model: session.model,
+        providerId: session.modelProviderId,
+      };
       this.sessions.set(session.id, session);
       if (session.sdkSessionId) {
-        this.sdkSessionLookup.set(this.sdkLookupKey(session.backend, session.sdkSessionId), session.id);
+        this.sdkSessionLookup.set(session.sdkSessionId, session.id);
       }
     }
     if (restored.length > 0) {
@@ -347,33 +270,28 @@ export class AgentManager {
 
   // --- Public API ---
 
-  private lastUsedSelection: Record<AgentBackend, { model: string; providerId?: string }> = {
-    claude: { model: DEFAULT_CLAUDE_MODEL },
-    opencode: { model: DEFAULT_OPENCODE_MODEL, providerId: DEFAULT_OPENCODE_PROVIDER },
+  private lastUsedSelection: { model: string; providerId?: string } = {
+    model: DEFAULT_OPENCODE_MODEL,
+    providerId: DEFAULT_OPENCODE_PROVIDER,
   };
 
   createSession(
     cwd: string,
     options?: {
-      backend?: AgentBackend;
       model?: string;
       modelProviderId?: string;
       permissionMode?: PermissionMode;
-      preset?: ModelPreset;
     },
   ): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
-    const backend = options?.backend ?? "claude";
-    const defaultSelection = this.lastUsedSelection[backend];
+    const defaultSelection = this.lastUsedSelection;
     const sessionModel = options?.model || defaultSelection.model;
-    const modelProviderId = backend === "opencode"
-      ? (options?.modelProviderId || defaultSelection.providerId || DEFAULT_OPENCODE_PROVIDER)
-      : undefined;
+    const modelProviderId = options?.modelProviderId || defaultSelection.providerId || DEFAULT_OPENCODE_PROVIDER;
 
     const session: AgentSession = {
       id,
-      backend,
+      backend: "opencode",
       sdkSessionId: "",
       repoName,
       cwd,
@@ -388,7 +306,6 @@ export class AgentManager {
       turnCount: 0,
       model: sessionModel,
       modelProviderId,
-      preset: options?.preset,
       permissionMode: options?.permissionMode || "plan",
       pendingQuestions: [],
       pendingPlanApproval: null,
@@ -407,11 +324,9 @@ export class AgentManager {
     cwd: string,
     prompt: string,
     options?: {
-      backend?: AgentBackend;
       model?: string;
       modelProviderId?: string;
       permissionMode?: PermissionMode;
-      preset?: ModelPreset;
     },
   ): Promise<AgentSession> {
     const session = this.createSession(cwd, options);
@@ -444,35 +359,14 @@ export class AgentManager {
       }
     }
 
-    const hasVisualContent = attachments?.some((a) =>
-      a.type.startsWith("image/") || a.type === "application/pdf"
-    ) ?? false;
-    if (session.backend === "opencode" && attachments && attachments.length > 0) {
+    if (attachments && attachments.length > 0) {
       throw new Error("OpenCode sessions do not support file attachments yet");
     }
 
-    const rawRequest = session.backend === "claude"
-      ? (hasVisualContent ? {
-        role: "user",
-        content: [
-          ...(text?.trim() ? [{ type: "text", text }] : []),
-          ...(attachments?.filter((a) => a.type.startsWith("image/")).map((a) => ({
-            type: "image",
-            source: { type: "base64" as const, media_type: a.type, data: a.data },
-          })) || []),
-          ...(attachments?.filter((a) => a.type === "application/pdf").map((a) => ({
-            type: "document",
-            source: { type: "base64" as const, media_type: "application/pdf", data: a.data },
-          })) || []),
-        ],
-      } : {
-        role: "user",
-        content: text || "",
-      })
-      : {
-        backend: "opencode",
-        parts: text?.trim() ? [{ type: "text", text }] : [],
-      };
+    const rawRequest = {
+      backend: "opencode",
+      parts: text?.trim() ? [{ type: "text", text }] : [],
+    };
 
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
@@ -488,8 +382,9 @@ export class AgentManager {
     session.lastActivity = new Date();
     session.turnStartedAt = session.lastActivity;
     session.status = "streaming";
+    this.opencodeErroredSessions.delete(session.id);
 
-    this.lastUsedSelection[session.backend] = {
+    this.lastUsedSelection = {
       model: session.model,
       providerId: session.modelProviderId,
     };
@@ -498,11 +393,7 @@ export class AgentManager {
     this.fireOnMessage(userMsg, session);
     this.fireOnSessionChange();
     try {
-      if (session.backend === "claude") {
-        this.sendClaudeMessage(sessionId, session, text, attachments, hasVisualContent);
-      } else {
-        await this.sendOpencodeMessage(sessionId, session, text);
-      }
+      await this.sendOpencodeMessage(sessionId, session, text);
     } catch (err) {
       session.status = "error";
       session.turnStartedAt = undefined;
@@ -519,112 +410,6 @@ export class AgentManager {
       this.fireOnSessionChange();
       throw err;
     }
-  }
-
-  private sendClaudeMessage(
-    sessionId: string,
-    session: AgentSession,
-    text: string,
-    attachments: { name: string; type: string; size: number; data: string }[] | undefined,
-    hasVisualContent: boolean,
-  ): void {
-    const existingController = this.abortControllers.get(sessionId);
-    if (existingController) {
-      existingController.abort();
-      this.abortControllers.delete(sessionId);
-    }
-    const existingQuery = this.queries.get(sessionId);
-    if (existingQuery) {
-      existingQuery.close();
-      this.queries.delete(sessionId);
-    }
-
-    const abortController = new AbortController();
-    this.abortControllers.set(sessionId, abortController);
-
-    const env = { ...process.env };
-    delete env.CLAUDECODE;
-
-    const options: Record<string, unknown> = {
-      cwd: session.cwd,
-      model: session.model,
-      abortController,
-      permissionMode: session.permissionMode,
-      env,
-      settingSources: ["user", "project", "local"],
-      canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
-        return this.handleCanUseTool(
-          sessionId,
-          toolName,
-          input as Record<string, unknown>,
-          opts.toolUseID,
-          opts.suggestions as PermissionUpdate[] | undefined,
-        );
-      },
-    };
-    if (session.permissionMode === "bypassPermissions") {
-      options.allowDangerouslySkipPermissions = true;
-    }
-    if (session.sdkSessionId) {
-      options.resume = session.sdkSessionId;
-    }
-
-    let prompt;
-    if (hasVisualContent) {
-      const imageAttachments = attachments!.filter((a) => a.type.startsWith("image/"));
-      const pdfAttachments = attachments!.filter((a) => a.type === "application/pdf");
-      const content: Array<{
-        type: string;
-        text?: string;
-        source?: { type: string; media_type: string; data: string };
-      }> = [];
-
-      if (text?.trim()) {
-        content.push({ type: "text", text });
-      }
-
-      for (const img of imageAttachments) {
-        content.push({
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: img.type,
-            data: img.data,
-          },
-        });
-      }
-
-      for (const pdf of pdfAttachments) {
-        content.push({
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: "application/pdf",
-            data: pdf.data,
-          },
-        });
-      }
-
-      async function* messageGenerator() {
-        yield {
-          type: "user" as const,
-          message: {
-            role: "user" as const,
-            content,
-          },
-          parent_tool_use_id: null,
-          session_id: "",
-        };
-      }
-
-      prompt = messageGenerator();
-    } else {
-      prompt = text || "";
-    }
-
-    const q = query({ prompt, options });
-    this.queries.set(sessionId, q);
-    this.consumeStream(sessionId, q);
   }
 
   private async sendOpencodeMessage(sessionId: string, session: AgentSession, text: string): Promise<void> {
@@ -692,18 +477,9 @@ export class AgentManager {
     this.resumeIfNoPending(session);
     this.fireOnSessionChange();
 
-    if (pending.backend === "opencode") {
-      this.resolveOpencodePermission(session, pending.toolUseId, allow).catch((err) =>
-        console.warn(`[opencode] permission reply failed:`, err)
-      );
-      return;
-    }
-
-    if (allow) {
-      pending.resolve({ behavior: "allow" });
-    } else {
-      pending.resolve({ behavior: "deny", message: message || "User denied permission" });
-    }
+    this.resolveOpencodePermission(session, pending.toolUseId, allow).catch((err) =>
+      console.warn(`[opencode] permission reply failed:`, err)
+    );
   }
 
   answerQuestion(sessionId: string, toolUseId: string, answers: Record<string, string>): void {
@@ -768,15 +544,6 @@ export class AgentManager {
 
     if (accept) {
       session.permissionMode = "acceptEdits";
-      if (session.preset === 'opus-plan') {
-        session.model = 'claude-sonnet-4-6';
-        const q = this.queries.get(sessionId);
-        if (q && typeof q.setModel === 'function') {
-          await q.setModel('claude-sonnet-4-6').catch((err: unknown) =>
-            console.warn(`[model-switch] setModel failed:`, err)
-          );
-        }
-      }
     }
 
     // Only transition to streaming if no more pending permissions/questions
@@ -788,14 +555,7 @@ export class AgentManager {
     this.fireOnSessionChange();
 
     if (accept) {
-      // Set permission mode BEFORE resolving so the SDK processes the next tool with the correct mode
-      const q = this.queries.get(sessionId);
-      if (q && typeof q.setPermissionMode === "function") {
-        await q.setPermissionMode("acceptEdits").catch((err: unknown) =>
-          console.warn(`[plan-approval] setPermissionMode failed:`, err)
-        );
-      }
-      pending.resolve({ behavior: "allow", updatedPermissions: buildExitPlanPermissions(pending.suggestions) });
+      pending.resolve({ behavior: "allow" });
     } else {
       pending.resolve({ behavior: "deny", message: feedback || "User requested revision", interrupt: false });
     }
@@ -834,23 +594,10 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
-    // Set stopped status BEFORE aborting so consumeStream's catch block sees it
     session.status = "stopped";
     session.hooksRunning = false;
 
-    const controller = this.abortControllers.get(sessionId);
-    if (controller) {
-      controller.abort();
-      this.abortControllers.delete(sessionId);
-    }
-
-    const q = this.queries.get(sessionId);
-    if (q) {
-      q.close();
-      this.queries.delete(sessionId);
-    }
-
-    if (session.backend === "opencode" && session.sdkSessionId) {
+    if (session.sdkSessionId) {
       this.abortOpencodeSession(session).catch((err) =>
         console.warn(`[opencode] abort failed:`, err)
       );
@@ -873,17 +620,13 @@ export class AgentManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
     session.permissionMode = mode;
-    const q = this.queries.get(sessionId);
-    if (session.backend === "claude" && q && typeof q.setPermissionMode === "function") {
-      await q.setPermissionMode(mode);
-    }
     this.persistSession(sessionId, true);
     this.fireOnSessionChange();
   }
 
   setSessionModel(
     sessionId: string,
-    options: { backend: AgentBackend; model: string; modelProviderId?: string },
+    options: { model: string; modelProviderId?: string },
   ): void {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
@@ -891,15 +634,9 @@ export class AgentManager {
     if (session.messages.length > 0) {
       throw new Error("Cannot change model after conversation has started");
     }
-    session.backend = options.backend;
     session.model = options.model;
-    session.modelProviderId = options.backend === "opencode"
-      ? (options.modelProviderId || DEFAULT_OPENCODE_PROVIDER)
-      : undefined;
-    if (options.backend !== "claude") {
-      session.preset = undefined;
-    }
-    this.lastUsedSelection[session.backend] = {
+    session.modelProviderId = options.modelProviderId || DEFAULT_OPENCODE_PROVIDER;
+    this.lastUsedSelection = {
       model: session.model,
       providerId: session.modelProviderId,
     };
@@ -913,11 +650,6 @@ export class AgentManager {
 
     this.resolveAllPending(session, "Session dismissed");
 
-    const controller = this.abortControllers.get(sessionId);
-    if (controller) controller.abort();
-    const q = this.queries.get(sessionId);
-    if (q) q.close();
-
     // Clear persist timer
     const timer = this.persistTimers.get(sessionId);
     if (timer) {
@@ -927,11 +659,8 @@ export class AgentManager {
 
     deleteSessionFile(sessionId);
     this.sessions.delete(sessionId);
-    this.queries.delete(sessionId);
-    this.abortControllers.delete(sessionId);
-    this.lastBroadcast.delete(sessionId);
     if (session.sdkSessionId) {
-      this.sdkSessionLookup.delete(this.sdkLookupKey(session.backend, session.sdkSessionId));
+      this.sdkSessionLookup.delete(session.sdkSessionId);
     }
 
     this.fireOnSessionChange();
@@ -1007,9 +736,8 @@ export class AgentManager {
     return session.messages.slice(-count);
   }
 
-  async getAvailableModels(): Promise<{ claude: ModelOption[]; opencode: ModelOption[]; opencodeError?: string }> {
-    const result: { claude: ModelOption[]; opencode: ModelOption[]; opencodeError?: string } = {
-      claude: CLAUDE_MODEL_OPTIONS,
+  async getAvailableModels(): Promise<{ opencode: ModelOption[]; opencodeError?: string }> {
+    const result: { opencode: ModelOption[]; opencodeError?: string } = {
       opencode: [],
     };
 
@@ -1036,7 +764,6 @@ export class AgentManager {
         .sort((a, b) => a.name.localeCompare(b.name));
       for (const model of models) {
         options.push({
-          backend: "opencode",
           providerId: provider.id,
           model: model.id,
           label: `${provider.name} / ${model.name}`,
@@ -1091,13 +818,18 @@ export class AgentManager {
   private async handleOpencodeEvent(event: OpenCodeEvent): Promise<void> {
     switch (event.type) {
       case "session.status": {
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        const session = this.getSessionBySdkSessionId(event.properties.sessionID);
         if (!session) break;
+        if (session.status === "stopped") break;
         if (event.properties.status.type === "busy") {
           if (session.status !== "needs_input") {
             session.status = "streaming";
           }
-        } else if (event.properties.status.type === "idle" && session.pendingPermissions.size === 0) {
+        } else if (
+          event.properties.status.type === "idle"
+          && session.pendingPermissions.size === 0
+          && !this.opencodeErroredSessions.has(session.id)
+        ) {
           session.status = "idle";
           session.turnStartedAt = undefined;
         }
@@ -1107,9 +839,10 @@ export class AgentManager {
       }
 
       case "session.idle": {
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        const session = this.getSessionBySdkSessionId(event.properties.sessionID);
         if (!session) break;
-        if (session.pendingPermissions.size === 0) {
+        if (session.status === "stopped") break;
+        if (session.pendingPermissions.size === 0 && !this.opencodeErroredSessions.has(session.id)) {
           session.status = "idle";
           session.turnStartedAt = undefined;
         }
@@ -1119,7 +852,7 @@ export class AgentManager {
       }
 
       case "session.updated": {
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.info.id);
+        const session = this.getSessionBySdkSessionId(event.properties.info.id);
         if (!session) break;
         session.lastActivity = new Date(event.properties.info.time.updated);
         this.persistSession(session.id);
@@ -1133,9 +866,12 @@ export class AgentManager {
           break;
         }
         const info = event.properties.info as OpenCodeAssistantMessage;
-        const session = this.getSessionBySdkSessionId("opencode", info.sessionID);
+        const session = this.getSessionBySdkSessionId(info.sessionID);
         if (!session) break;
         this.upsertOpencodeAssistantMessage(session, info.id, info.time.created, info);
+        if (session.status === "stopped" && info.error && this.isAbortLikeError(this.formatOpencodeErrorMessage(info.error))) {
+          break;
+        }
         if (info.time.completed || info.error) {
           this.upsertOpencodeResultMessage(session, info);
         }
@@ -1145,7 +881,7 @@ export class AgentManager {
       case "message.part.updated": {
         const role = this.opencodeMessageRoles.get(event.properties.part.messageID);
         if (role !== "assistant") break;
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.part.sessionID);
+        const session = this.getSessionBySdkSessionId(event.properties.part.sessionID);
         if (!session) break;
         const parts = this.opencodeParts.get(event.properties.part.messageID) ?? [];
         const existingIndex = parts.findIndex((part) => part.id === event.properties.part.id);
@@ -1160,29 +896,36 @@ export class AgentManager {
       }
 
       case "permission.updated": {
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        const session = this.getSessionBySdkSessionId(event.properties.sessionID);
         if (!session) break;
         this.applyOpencodePermissionUpdated(session, event.properties);
         break;
       }
 
       case "permission.replied": {
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        const session = this.getSessionBySdkSessionId(event.properties.sessionID);
         if (!session) break;
         this.applyOpencodePermissionReplied(session, event.properties.permissionID, event.properties.response);
         break;
       }
 
       case "session.error": {
-        if (!event.properties.sessionID) break;
-        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        const session = this.getSessionForOpencodeError(event.properties.sessionID);
         if (!session) break;
+        if (session.status === "stopped") {
+          this.persistSession(session.id, true);
+          this.fireOnSessionChange();
+          break;
+        }
+        this.opencodeErroredSessions.add(session.id);
         session.status = "error";
+        session.turnStartedAt = undefined;
+        const errorText = this.formatOpencodeErrorMessage(event.properties.error);
         const errorMsg: AgentMessage = {
           id: crypto.randomUUID(),
           type: "result",
           timestamp: new Date(),
-          text: `Error: ${event.properties.error?.data.message || "OpenCode session failed"}`,
+          text: `Error: ${errorText}`,
           isError: true,
         };
         this.pushMessage(session, errorMsg);
@@ -1192,6 +935,17 @@ export class AgentManager {
         break;
       }
     }
+  }
+
+  private getSessionForOpencodeError(sessionID?: string): AgentSession | undefined {
+    if (sessionID) {
+      return this.getSessionBySdkSessionId(sessionID);
+    }
+    const active = Array.from(this.sessions.values()).filter((session) =>
+      (session.status === "streaming" || session.status === "starting")
+      && Boolean(session.turnStartedAt)
+    );
+    return active.length === 1 ? active[0] : undefined;
   }
 
   private applyOpencodePermissionUpdated(session: AgentSession, permission: OpenCodePermission): void {
@@ -1218,7 +972,6 @@ export class AgentManager {
     }, PERMISSION_TIMEOUT_MS);
 
     session.pendingPermissions.set(permission.id, {
-      backend: "opencode",
       toolUseId: permission.id,
       toolName: permission.title || permission.type,
       toolInput,
@@ -1320,7 +1073,7 @@ export class AgentManager {
     }
     if (info) {
       session.lastActivity = new Date(info.time.completed ?? info.time.created);
-      if (!info.error && !session.pendingPermissions.size) {
+      if (session.status !== "stopped" && !info.error && !session.pendingPermissions.size) {
         session.status = info.time.completed ? "idle" : "streaming";
       }
       if (info.modelID) {
@@ -1408,10 +1161,32 @@ export class AgentManager {
     return blocks;
   }
 
-  private formatOpencodeErrorMessage(info: OpenCodeAssistantMessage): string {
-    const error = info.error;
+  private formatOpencodeErrorMessage(error: OpenCodeAssistantMessage["error"]): string {
     if (!error) {
       return "OpenCode session failed";
+    }
+    if (error.name === "ProviderAuthError" && error.data?.providerID && error.data?.message) {
+      return `${error.data.providerID}: ${error.data.message}`;
+    }
+    if (error.name === "APIError" && error.data) {
+      const parts = [error.data.message];
+      if (typeof error.data.statusCode === "number") {
+        parts.push(`(HTTP ${error.data.statusCode})`);
+      }
+      if (typeof error.data.responseBody === "string" && error.data.responseBody.trim()) {
+        const responseBody = error.data.responseBody.trim();
+        try {
+          const parsed = JSON.parse(responseBody);
+          if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string") {
+            parts.push(parsed.error);
+          } else {
+            parts.push(responseBody);
+          }
+        } catch {
+          parts.push(responseBody);
+        }
+      }
+      return parts.join(" ");
     }
     if ("data" in error && error.data && typeof error.data === "object" && "message" in error.data && typeof error.data.message === "string") {
       return error.data.message;
@@ -1419,12 +1194,17 @@ export class AgentManager {
     return error.name || "OpenCode session failed";
   }
 
+  private isAbortLikeError(message: unknown): boolean {
+    if (typeof message !== "string" || !message) return false;
+    return message.toLowerCase().includes("aborted");
+  }
+
   private upsertOpencodeResultMessage(session: AgentSession, info: OpenCodeAssistantMessage): void {
     const resultId = `result-${info.id}`;
     let resultMsg = session.messages.find((msg) => msg.id === resultId && msg.type === "result");
     const timestamp = new Date(info.time.completed ?? Date.now());
     const isError = Boolean(info.error);
-    const resultText = isError ? this.formatOpencodeErrorMessage(info) : "Done";
+    const resultText = isError ? this.formatOpencodeErrorMessage(info.error) : "Done";
 
     if (!resultMsg) {
       session.totalCostUsd += info.cost || 0;
@@ -1453,7 +1233,14 @@ export class AgentManager {
       resultMsg.uiAction = "replace";
     }
 
-    session.status = isError ? "error" : (session.pendingPermissions.size > 0 ? "needs_input" : "idle");
+    if (isError) {
+      this.opencodeErroredSessions.add(session.id);
+    } else {
+      this.opencodeErroredSessions.delete(session.id);
+    }
+    if (session.status !== "stopped") {
+      session.status = isError ? "error" : (session.pendingPermissions.size > 0 ? "needs_input" : "idle");
+    }
     session.turnStartedAt = undefined;
     this.persistSession(session.id);
     this.fireOnMessage(resultMsg!, session);
@@ -1481,463 +1268,6 @@ export class AgentManager {
       query: { directory: session.cwd },
       responseStyle: "data",
       throwOnError: true,
-    });
-  }
-
-  // --- Stream Consumer ---
-
-  private async consumeStream(sessionId: string, q: Query): Promise<void> {
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    try {
-      for await (const msg of q) {
-        const s = this.sessions.get(sessionId);
-        if (!s) break;
-
-        await this.handleSDKMessage(sessionId, s, msg);
-      }
-
-      // Generator ended without a result message (SDK stream closed prematurely,
-      // e.g. due to setModel restarting the underlying query or a network drop).
-      // Ensure the session is not left stuck in streaming state.
-      const s = this.sessions.get(sessionId);
-      if (s && (s.status === "streaming" || s.status === "starting")) {
-        s.status = "idle";
-        s.turnStartedAt = undefined;
-        s.hooksRunning = false;
-        this.persistSession(sessionId, true);
-        this.fireOnSessionChange();
-      }
-    } catch (err: unknown) {
-      const s = this.sessions.get(sessionId);
-      if (s && s.status !== "stopped") {
-        s.status = "error";
-        const errorMsg: AgentMessage = {
-          id: crypto.randomUUID(),
-          type: "result",
-          timestamp: new Date(),
-          text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          isError: true,
-        };
-        s.messages.push(errorMsg);
-        this.persistSession(sessionId, true);
-        this.fireOnMessage(errorMsg, s);
-        this.fireOnSessionChange();
-      }
-    } finally {
-      this.queries.delete(sessionId);
-      this.abortControllers.delete(sessionId);
-    }
-  }
-
-  private async handleSDKMessage(sessionId: string, session: AgentSession, msg: SDKMessage): Promise<void> {
-    switch (msg.type) {
-      case "system": {
-        if (msg.subtype === "init") {
-          this.setSdkSessionId(session, msg.session_id);
-          session.status = "streaming";
-          const initModel = (msg as SDKSystemInitMessage).model;
-          // Accept whatever model the SDK resolved (may include version suffix)
-          session.model = initModel ?? session.model;
-          this.persistSession(sessionId, true);
-          this.fireOnSessionChange();
-        } else if (msg.subtype === "hook_started" && (msg as SDKSystemHookMessage).hook_event === "Stop") {
-          // Stop hooks only run after the model's turn is complete — use it to
-          // set status to idle immediately rather than waiting for the result message.
-          if (session.status === "streaming" || session.status === "starting") {
-            session.status = "idle";
-            session.turnStartedAt = undefined;
-          }
-          session.hooksRunning = true;
-          this.persistSession(sessionId, true);
-          this.fireOnSessionChange();
-          this.fireOnMessage({
-            id: `hook-status-${sessionId}`,
-            type: "system",
-            timestamp: new Date(),
-            hookStatus: "running",
-          }, session);
-        }
-        break;
-      }
-
-      case "assistant": {
-        // Don't overwrite needs_input status — a permission/question may still be pending
-        if (session.status !== "needs_input") {
-          session.status = "streaming";
-        }
-        session.lastActivity = new Date();
-
-        const betaMsg = msg.message;
-        const contentBlocks: ContentBlock[] = [];
-        let text = "";
-
-        if (Array.isArray(betaMsg.content)) {
-          // First pass: collect all tool_uses into a lookup map
-          const toolUseMap = new Map<string, string>();
-          for (const block of betaMsg.content) {
-            if (block.type === "tool_use") {
-              toolUseMap.set(block.id, block.name);
-            }
-          }
-
-          // Second pass: build contentBlocks
-          for (const block of betaMsg.content) {
-            switch (block.type) {
-              case "text":
-                contentBlocks.push({ type: "text", text: block.text });
-                text += block.text;
-                break;
-              case "thinking":
-                contentBlocks.push({ type: "thinking", text: (block as SDKThinkingBlock).thinking });
-                break;
-              case "tool_use":
-                contentBlocks.push({
-                  type: "tool_use",
-                  toolName: block.name,
-                  toolInput: block.input,
-                  toolUseId: block.id,
-                });
-                break;
-              case "tool_result": {
-                const toolResultBlock = block as SDKToolResultBlock;
-                const toolUseId = toolResultBlock.tool_use_id;
-                contentBlocks.push({
-                  type: "tool_result",
-                  content: typeof toolResultBlock.content === "string"
-                    ? toolResultBlock.content
-                    : JSON.stringify(toolResultBlock.content),
-                  toolUseId,
-                  toolName: toolUseMap.get(toolUseId),
-                  isError: toolResultBlock.is_error,
-                });
-                break;
-              }
-            }
-          }
-        }
-
-        const usage = betaMsg.usage;
-        if (usage) {
-          session.inputTokens += usage.input_tokens ?? 0;
-          session.outputTokens += usage.output_tokens ?? 0;
-        }
-
-        if (text.trim()) {
-          session.lastMessagePreview = text.slice(0, 80);
-        }
-
-        if (betaMsg.stop_reason === "end_turn") {
-          session.status = "idle";
-        }
-
-        // Store raw response for raw mode
-        const rawResponse = {
-          id: msg.uuid,
-          type: "message",
-          role: "assistant",
-          content: betaMsg.content,
-          model: session.model,
-          stop_reason: betaMsg.stop_reason,
-          usage: betaMsg.usage,
-        };
-
-        const agentMsg: AgentMessage = {
-          id: msg.uuid ?? crypto.randomUUID(),
-          type: "assistant",
-          timestamp: new Date(),
-          contentBlocks,
-          text: text.trim(),
-          inputTokens: usage?.input_tokens,
-          outputTokens: usage?.output_tokens,
-          rawResponse,
-        };
-
-        this.pushMessage(session, agentMsg);
-        this.persistSession(sessionId);
-        this.fireOnMessage(agentMsg, session);
-        this.fireOnSessionChange();
-        break;
-      }
-
-      case "result": {
-        session.lastActivity = new Date();
-        session.turnStartedAt = undefined;
-
-        if (session.hooksRunning) {
-          session.hooksRunning = false;
-          this.fireOnMessage({
-            id: `hook-status-${sessionId}`,
-            type: "system",
-            timestamp: new Date(),
-            hookStatus: "done",
-          }, session);
-        }
-
-        if (msg.subtype === "success") {
-          session.status = "idle";
-          session.totalCostUsd = msg.total_cost_usd ?? session.totalCostUsd;
-          session.turnCount = msg.num_turns ?? session.turnCount;
-
-          const agentMsg: AgentMessage = {
-            id: msg.uuid ?? crypto.randomUUID(),
-            type: "result",
-            timestamp: new Date(),
-            text: msg.result,
-            durationMs: msg.duration_ms,
-            costUsd: msg.total_cost_usd,
-            numTurns: msg.num_turns,
-            isError: false,
-          };
-          this.pushMessage(session, agentMsg);
-          this.persistSession(sessionId, true);
-          this.fireOnMessage(agentMsg, session);
-        } else {
-          session.status = "error";
-          const agentMsg: AgentMessage = {
-            id: msg.uuid ?? crypto.randomUUID(),
-            type: "result",
-            timestamp: new Date(),
-            text: (msg as SDKResultErrorMessage).error ?? "Agent ended with error",
-            isError: true,
-          };
-          this.pushMessage(session, agentMsg);
-          this.persistSession(sessionId, true);
-          this.fireOnMessage(agentMsg, session);
-        }
-
-        this.fireOnSessionChange();
-        await this.scanLaunchableRepos();
-        this.fireOnSessionChange();
-        break;
-      }
-
-      default: {
-        session.lastActivity = new Date();
-        const now = Date.now();
-        const lastBroadcast = this.lastBroadcast.get(sessionId) ?? 0;
-        if (now - lastBroadcast > 5000) {
-          this.lastBroadcast.set(sessionId, now);
-          this.fireOnSessionChange();
-        }
-        break;
-      }
-    }
-  }
-
-  // --- Permission Handler ---
-
-  private handleCanUseTool(
-    sessionId: string,
-    toolName: string,
-    input: Record<string, unknown>,
-    toolUseId: string,
-    suggestions?: PermissionUpdate[],
-  ): Promise<{ behavior: "allow" } | { behavior: "deny"; message: string }> {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return Promise.resolve({ behavior: "deny", message: "Session not found" });
-    }
-
-    if (toolName === "AskUserQuestion") {
-      return this.handleAskUserQuestion(session, input, toolUseId);
-    }
-
-    if (toolName === "ExitPlanMode") {
-      return this.handleExitPlanMode(session, input, toolUseId, suggestions);
-    }
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const safeResolve = (result: { behavior: "allow" } | { behavior: "deny"; message: string }) => {
-        if (settled) return;
-        settled = true;
-        resolve(result);
-      };
-
-      const timeoutId = setTimeout(() => {
-        if (settled) return;
-        session.pendingPermissions.delete(toolUseId);
-        this.resumeIfNoPending(session);
-
-        // Update the inline permission message to show timed out state
-        const permMsg = session.messages.find(m => m.id === `perm-${toolUseId}`);
-        if (permMsg?.permissionData) {
-          permMsg.permissionData.resolved = "timed_out";
-          this.fireOnMessage(permMsg, session);
-        }
-        this.fireOnSessionChange();
-
-        safeResolve({ behavior: "deny", message: "Permission timed out after 5 minutes" });
-      }, PERMISSION_TIMEOUT_MS);
-
-      session.pendingPermissions.set(toolUseId, {
-        backend: "claude",
-        toolUseId,
-        toolName,
-        toolInput: input,
-        resolve: safeResolve,
-        timeoutId,
-      });
-      session.status = "needs_input";
-      this.fireOnSessionChange();
-
-      // Emit permission request as an inline message with deterministic ID
-      const permMsg: AgentMessage = {
-        id: `perm-${toolUseId}`,
-        type: "system",
-        timestamp: new Date(),
-        text: `Permission requested: ${toolName}`,
-        sessionId,
-        permissionData: { toolName, toolInput: input, toolUseId },
-      };
-      this.pushMessage(session, permMsg);
-      this.fireOnMessage(permMsg, session);
-    });
-  }
-
-  // --- Question Handler ---
-
-  private handleAskUserQuestion(
-    session: AgentSession,
-    input: Record<string, unknown>,
-    toolUseId: string,
-  ): Promise<PermissionResult> {
-    const rawQuestions = Array.isArray(input.questions) ? input.questions : [];
-    const questions: QuestionItem[] = rawQuestions.map((q: any) => ({
-      question: String(q.question ?? ""),
-      header: String(q.header ?? ""),
-      options: Array.isArray(q.options)
-        ? q.options.map((o: any) => ({
-            label: String(o.label ?? ""),
-            description: o.description ? String(o.description) : undefined,
-          }))
-        : [],
-      multiSelect: Boolean(q.multiSelect),
-    }));
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const safeResolve = (result: PermissionResult) => {
-        if (settled) return;
-        settled = true;
-        resolve(result);
-      };
-
-      const firstQuestion = questions[0]?.question ?? "Question";
-
-      const timeoutId = setTimeout(() => {
-        if (settled) return;
-        // Find and remove this question from the pending array
-        const idx = session.pendingQuestions.findIndex(q => q.toolUseId === toolUseId);
-        if (idx !== -1) {
-          session.pendingQuestions.splice(idx, 1);
-        }
-        this.resumeIfNoPending(session);
-
-        // Update the inline question message to show timed out state
-        const qMsg = session.messages.find(m => m.id === `q-${toolUseId}`);
-        if (qMsg?.questionData) {
-          qMsg.questionData.resolved = "timed_out";
-          this.fireOnMessage(qMsg, session);
-        }
-        this.fireOnSessionChange();
-
-        safeResolve({ behavior: "deny", message: "Question timed out after 5 minutes" });
-      }, PERMISSION_TIMEOUT_MS);
-
-      session.pendingQuestions.push({
-        toolUseId,
-        questions,
-        originalInput: input,
-        resolve: safeResolve,
-        timeoutId,
-      });
-      session.status = "needs_input";
-      this.fireOnSessionChange();
-
-      // Emit question as an inline message with deterministic ID
-      const qMsg: AgentMessage = {
-        id: `q-${toolUseId}`,
-        type: "system",
-        timestamp: new Date(),
-        text: `Question asked: ${firstQuestion}`,
-        sessionId: session.id,
-        questionData: { questions, originalInput: input },
-      };
-      this.pushMessage(session, qMsg);
-      this.fireOnMessage(qMsg, session);
-    });
-  }
-
-  // --- Plan Approval Handler ---
-
-  private handleExitPlanMode(
-    session: AgentSession,
-    input: Record<string, unknown>,
-    toolUseId: string,
-    suggestions?: PermissionUpdate[],
-  ): Promise<PermissionResult> {
-    const rawPrompts = Array.isArray(input.allowedPrompts) ? input.allowedPrompts : [];
-    const allowedPrompts = rawPrompts.map((p: any) => ({
-      tool: "Bash" as const,
-      prompt: String(p.prompt ?? ""),
-    }));
-    const planContent = typeof input.plan === "string" ? input.plan : undefined;
-
-    return new Promise((resolve) => {
-      let settled = false;
-      const safeResolve = (result: PermissionResult) => {
-        if (settled) return;
-        settled = true;
-        resolve(result);
-      };
-
-      const timeoutId = setTimeout(() => {
-        if (settled) return;
-        session.pendingPlanApproval = null;
-        if (session.pendingPermissions.size === 0 && session.pendingQuestions.length === 0) {
-          session.status = "streaming";
-        }
-
-        const planMsg = session.messages.find(m => m.id === `plan-${toolUseId}`);
-        if (planMsg?.planApprovalData) {
-          planMsg.planApprovalData.resolved = "timed_out";
-          this.fireOnMessage(planMsg, session);
-        }
-        this.fireOnSessionChange();
-
-        safeResolve({ behavior: "deny", message: "Plan approval timed out after 5 minutes" });
-      }, PERMISSION_TIMEOUT_MS);
-
-      // Resolve any existing plan approval before setting a new one
-      if (session.pendingPlanApproval) {
-        clearTimeout(session.pendingPlanApproval.timeoutId);
-        session.pendingPlanApproval.resolve({ behavior: "deny", message: "Superseded by new plan approval" });
-      }
-
-      session.pendingPlanApproval = {
-        toolUseId,
-        allowedPrompts,
-        originalInput: input,
-        suggestions,
-        resolve: safeResolve,
-        timeoutId,
-      };
-      session.status = "needs_input";
-      this.fireOnSessionChange();
-
-      const planMsg: AgentMessage = {
-        id: `plan-${toolUseId}`,
-        type: "system",
-        timestamp: new Date(),
-        text: "Plan ready for review",
-        sessionId: session.id,
-        planApprovalData: { allowedPrompts, toolUseId, planContent },
-      };
-      this.pushMessage(session, planMsg);
-      this.fireOnMessage(planMsg, session);
     });
   }
 

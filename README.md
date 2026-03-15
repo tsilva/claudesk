@@ -4,10 +4,9 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun-f9f1e1.svg?logo=bun)](https://bun.sh)
   [![HTMX](https://img.shields.io/badge/HTMX-SSE-3366cc.svg)](https://htmx.org)
-  [![Claude SDK](https://img.shields.io/badge/Claude-Agents_SDK-d97757.svg)](https://docs.anthropic.com)
   [![OpenCode SDK](https://img.shields.io/badge/OpenCode-SDK-2f855a.svg)](https://opencode.ai)
 
-  🖥️ **Interactive dashboard for launching and managing Claude Code and OpenCode agents** ⚡
+  🖥️ **Interactive dashboard for launching and managing OpenCode agents** ⚡
 
   [GitHub](https://github.com/tsilva/claudesk)
 </div>
@@ -18,17 +17,17 @@
 
 **The pain:** Running coding agents across different repositories means juggling terminals, missing permission prompts, and having no central view of what your agents are doing.
 
-**The solution:** claudesk uses the Claude Agents SDK and OpenCode SDK to launch and manage coding agents directly from a web dashboard — start agents, send follow-up prompts, approve permissions, and monitor progress in real time.
+**The solution:** claudesk uses the OpenCode SDK to launch and manage coding agents directly from a web dashboard — start agents, send follow-up prompts, approve permissions, and monitor progress in real time.
 
 **The result:** One browser tab to launch, interact with, and control all your coding agents — with live streaming, permission handling, and desktop notifications.
 
 ### ✨ Features
 
-- 🚀 **Launch agents** — start Claude SDK or OpenCode SDK sessions on any git repo from the dashboard
+- 🚀 **Launch agents** — start OpenCode sessions on any git repo from the dashboard
 - 💬 **Interactive conversations** — send follow-up prompts and get streaming responses
 - 🔐 **Permission handling** — approve or deny tool permissions through the UI
 - 📡 **Real-time streaming** — SDK message stream via SSE with HTMX partial updates
-- 🧭 **Backend-aware model picker** — switch a new session between Claude SDK and OpenCode SDK models before the first prompt
+- 🧭 **Provider-aware model picker** — switch a new session between any OpenCode-configured provider/model before the first prompt
 - 🔔 **Desktop notifications** — instant alerts when an agent needs input
 - 📊 **Cost & token tracking** — live token counts, turn stats, and cost per session
 - ⏹️ **Agent control** — stop running agents, dismiss completed sessions
@@ -40,7 +39,7 @@
 |-------|-----------|
 | Runtime | [Bun](https://bun.sh) |
 | Server | [Hono](https://hono.dev) |
-| Agent SDKs | [@anthropic-ai/claude-agent-sdk](https://docs.anthropic.com) + [@opencode-ai/sdk](https://opencode.ai) |
+| Agent SDK | [@opencode-ai/sdk](https://opencode.ai) |
 | Frontend | [HTMX](https://htmx.org) + SSE |
 | Styling | Vanilla CSS (dark theme) |
 | Build step | None |
@@ -52,8 +51,7 @@
 ### Prerequisites
 
 - [Bun](https://bun.sh) (v1.0+)
-- An Anthropic API key (set `ANTHROPIC_API_KEY` environment variable)
-- Optional for OpenCode sessions: the `opencode` CLI installed and whichever provider credentials your OpenCode config uses
+- The `opencode` CLI installed and authenticated with whichever provider credentials you want to use
 
 ### Install & Run
 
@@ -64,7 +62,7 @@ bun install
 bun run dev
 ```
 
-Open **http://localhost:3456** — select a repo from the sidebar, create a session, optionally switch its backend/model from the footer picker, then send a prompt.
+Open **http://localhost:3456** — select a repo from the sidebar, create a session, optionally switch its provider/model from the footer picker, then send a prompt.
 
 ---
 
@@ -73,14 +71,9 @@ Open **http://localhost:3456** — select a repo from the sidebar, create a sess
 ### Data Flow
 
 ```
-User creates session → POST /api/agents/launch { cwd, backend?, model?, modelProviderId? }
+User creates session → POST /api/agents/launch { cwd, model?, modelProviderId? }
   → AgentManager.createSession()
   → User sends prompt via POST /api/agents/:id/message
-
-Claude session:
-  → query({ prompt, options: { cwd, canUseTool, resume? } })
-  → for await (msg of generator)
-    → transform SDKMessage → AgentMessage → SSE broadcast
 
 OpenCode session:
   → create local OpenCode server/client on demand
@@ -114,16 +107,15 @@ OpenCode session:
 
 | Route | Body | Description |
 |-------|------|-------------|
-| `GET /api/models` | — | List selectable Claude and OpenCode models |
-| `POST /api/agents/launch` | `{ cwd, backend?, model?, modelProviderId?, permissionMode?, preset? }` | Create a new session |
+| `GET /api/models` | — | List selectable OpenCode provider/model combinations |
+| `POST /api/agents/launch` | `{ cwd, model?, modelProviderId?, permissionMode? }` | Create a new session |
 | `POST /api/agents/:id/message` | `{ text }` | Send follow-up message |
 | `POST /api/agents/:id/permission` | `{ allow, message? }` | Respond to permission request |
-| `POST /api/agents/:id/answer` | `{ answers }` | Answer agent question |
-| `POST /api/agents/:id/model` | `{ backend, model, modelProviderId? }` | Change backend/model before first message |
+| `POST /api/agents/:id/model` | `{ model, modelProviderId? }` | Change provider/model before first message |
 | `POST /api/agents/:id/stop` | — | Stop a running agent |
 | `DELETE /sessions/:id` | — | Dismiss a session |
 
-OpenCode note: session messages are supported, but file attachments are currently Claude-only.
+OpenCode note: file attachments are not supported yet.
 
 ### SSE Event Types
 

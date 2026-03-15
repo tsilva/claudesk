@@ -1,7 +1,7 @@
 {
   "name": "claudesk",
   "version": "0.1.0",
-  "description": "Interactive dashboard for managing Claude Code agent sessions",
+  "description": "Interactive dashboard for managing OpenCode agent sessions",
   "module": "src/server.ts",
   "type": "module",
   "bin": {
@@ -23,7 +23,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.44",
     "@opencode-ai/sdk": "^1.2.26",
     "highlight.js": "^11.11.1",
     "hono": "^4.11.9",

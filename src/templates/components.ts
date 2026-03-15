@@ -211,10 +211,8 @@ function friendlyModelName(session: AgentSession): string {
   if (model.startsWith('claude-opus-4')) return 'Opus 4.6';
   if (model.startsWith('claude-sonnet-4')) return 'Sonnet 4.6';
   if (model.startsWith('claude-haiku')) return 'Haiku';
-  if (session.backend === "opencode") {
-    const provider = session.modelProviderId ? `${session.modelProviderId} / ` : "";
-    return `OpenCode ${provider}${model}`;
-  }
+  const provider = session.modelProviderId ? `${session.modelProviderId} / ` : "";
+  if (provider) return `${provider}${model}`;
   return model;
 }
 
@@ -223,25 +221,14 @@ function friendlyModelName(session: AgentSession): string {
 export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
-  const currentMode = session.permissionMode === 'default' ? 'plan' : (session.permissionMode || 'plan');
   const modelLabelText = session.model ? friendlyModelName(session) : "";
   const hasMessages = session.messages.length > 0;
-  const modeIsInteractive = session.backend === "claude";
   // Model is clickable only before first message is sent
   const modelClass = hasMessages ? "stat" : "stat model-stat--interactive";
-  const modelDataAttrs = hasMessages ? "" : `data-session-id="${session.id}" data-action="show-model-picker"`;
+  const modelDataAttrs = hasMessages ? "" : `data-session-id="${session.id}" data-action="show-model-picker" data-current-model="${escapeHtml(session.model)}" data-current-provider-id="${escapeHtml(session.modelProviderId || "")}"`;
   const modelTitle = hasMessages ? "" : "Click to change model (before first message)";
-  const modeClass = modeIsInteractive
-    ? `stat mode-stat mode-stat--${currentMode} mode-stat--interactive`
-    : `stat mode-stat mode-stat--${currentMode}`;
-  const modeAttrs = modeIsInteractive
-    ? `onclick="cycleMode('${session.id}')" title="${escapeHtml(modeTooltip(session.permissionMode))} (shift+tab)"`
-    : `title="Permission mode switching is only available for Claude SDK sessions"`;
-  const leadStatClass = modeIsInteractive ? modeClass : "stat";
-  const leadStatAttrs = modeIsInteractive ? modeAttrs : `title="OpenCode SDK session"`;
-  const leadStatText = modeIsInteractive ? modeLabel(session.permissionMode) : "OpenCode";
   return `<div class="stats-row">
-    <span class="${leadStatClass}" ${leadStatAttrs}>${escapeHtml(leadStatText)}</span>
+    <span class="stat" title="OpenCode SDK session">OpenCode</span>
     <span class="stat-sep">·</span>
     <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
@@ -833,7 +820,7 @@ function renderSystemMessage(msg: AgentMessage): string {
 export function renderRawConversation(session: AgentSession, messages: AgentMessage[]): string {
   const lines: string[] = [];
   lines.push(`=== SESSION: ${session.repoName} (${session.id}) ===`);
-  lines.push(`Backend: ${session.backend}`);
+  lines.push(`Runtime: OpenCode`);
   lines.push(`Model: ${session.model || "default"}`);
   if (session.modelProviderId) {
     lines.push(`Provider: ${session.modelProviderId}`);

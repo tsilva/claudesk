@@ -63,6 +63,26 @@ export function renderLayout(
     </div>
   </div>
   <div id="notification-banner" class="notification-banner hidden"></div>
+  <div id="model-modal" class="model-modal hidden" aria-hidden="true">
+    <div class="model-modal-backdrop" data-action="dismiss-model-modal"></div>
+    <div class="model-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">
+      <div class="model-modal-header">
+        <div class="model-modal-heading">
+          <div class="model-modal-eyebrow">Model Selection</div>
+          <h2 id="model-modal-title" class="model-modal-title">Choose a model</h2>
+          <p id="model-modal-subtitle" class="model-modal-subtitle">Pick the OpenCode model for this session before sending the first message.</p>
+        </div>
+        <button type="button" class="model-modal-close" data-action="dismiss-model-modal" aria-label="Close model selector">×</button>
+      </div>
+      <div class="model-modal-meta">
+        <div id="model-modal-session" class="model-modal-session"></div>
+        <div id="model-modal-current" class="model-modal-current"></div>
+      </div>
+      <div id="model-modal-content" class="model-modal-content">
+        <div class="model-modal-note">Loading models...</div>
+      </div>
+    </div>
+  </div>
   <script src="/static/app.js"></script>
 </body>
 </html>`;

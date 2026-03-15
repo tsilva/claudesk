@@ -131,12 +131,21 @@ This extension adds support for Server Sent Events to htmx.  See /www/extensions
             return
           }
 
+          var detail = {
+            type: sseEventName,
+            data: event.data,
+            lastEventId: event.lastEventId,
+            origin: event.origin,
+            source: event.source,
+            rawEvent: event,
+          }
+
           // swap the response into the DOM and trigger a notification
-          if (!api.triggerEvent(elt, 'htmx:sseBeforeMessage', event)) {
+          if (!api.triggerEvent(elt, 'htmx:sseBeforeMessage', detail)) {
             return
           }
-          swap(elt, event.data)
-          api.triggerEvent(elt, 'htmx:sseMessage', event)
+          swap(elt, detail.data)
+          api.triggerEvent(elt, 'htmx:sseMessage', detail)
         }
 
         // Register the new listener
@@ -182,9 +191,17 @@ This extension adds support for Server Sent Events to htmx.  See /www/extensions
           if (!api.bodyContains(elt)) {
             source.removeEventListener(ts.trigger.slice(4), listener)
           }
+          var detail = {
+            type: ts.trigger.slice(4),
+            data: event.data,
+            lastEventId: event.lastEventId,
+            origin: event.origin,
+            source: event.source,
+            rawEvent: event,
+          }
           // Trigger events to be handled by the rest of htmx
-          htmx.trigger(elt, ts.trigger, event)
-          htmx.trigger(elt, 'htmx:sseMessage', event)
+          htmx.trigger(elt, ts.trigger, detail)
+          htmx.trigger(elt, 'htmx:sseMessage', detail)
         }
 
         // Register the new listener

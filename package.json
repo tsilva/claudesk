@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.44",
+    "@opencode-ai/sdk": "^1.2.26",
     "highlight.js": "^11.11.1",
     "hono": "^4.11.9",
     "marked": "^17.0.2"

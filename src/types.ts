@@ -8,6 +8,8 @@ export type AgentStatus =
   | "error"
   | "stopped";
 
+export type AgentBackend = "claude" | "opencode";
+
 // --- Content Blocks (reused from old sessions.ts) ---
 
 export interface ContentBlock {
@@ -16,6 +18,7 @@ export interface ContentBlock {
   toolName?: string;
   toolInput?: unknown;
   toolUseId?: string;
+  partId?: string;
   content?: string;
   isError?: boolean;
   // For image content blocks
@@ -77,11 +80,13 @@ export interface AgentMessage {
   // Raw SDK message data for truly raw mode
   rawRequest?: unknown;
   rawResponse?: unknown;
+  uiAction?: "append" | "replace";
 }
 
 // --- Permission & Question handling ---
 
 export interface PendingPermission {
+  backend: AgentBackend;
   toolUseId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -140,6 +145,7 @@ export type ModelPreset = 'opus' | 'sonnet' | 'opus-plan';
 
 export interface AgentSession {
   id: string;
+  backend: AgentBackend;
   sdkSessionId: string;
   repoName: string;
   cwd: string;
@@ -154,6 +160,7 @@ export interface AgentSession {
   outputTokens: number;
   turnCount: number;
   model: string;
+  modelProviderId?: string;
   preset?: ModelPreset;
   permissionMode: PermissionMode;
   hooksRunning?: boolean;
@@ -211,7 +218,7 @@ export interface SDKResultErrorMessage {
 // --- Persisted types (serializable to JSON) ---
 
 // Transient fields excluded from persistence
-export type PersistedMessage = Omit<AgentMessage, 'timestamp' | 'hookStatus' | 'rawRequest' | 'rawResponse'> & { timestamp: string };
+export type PersistedMessage = Omit<AgentMessage, 'timestamp' | 'hookStatus' | 'rawRequest' | 'rawResponse' | 'uiAction'> & { timestamp: string };
 
 export type PersistedSession = Omit<AgentSession, 'lastActivity' | 'createdAt' | 'turnStartedAt' | 'hooksRunning' | 'pendingPermissions' | 'pendingQuestions' | 'pendingPlanApproval' | 'messages'> & {
   lastActivity: string;

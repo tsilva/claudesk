@@ -206,10 +206,15 @@ export function renderSessionHeaderStatus(session: AgentSession, isRawMode: bool
 
 // --- Model Names ---
 
-function friendlyModelName(model: string): string {
+function friendlyModelName(session: AgentSession): string {
+  const model = session.model;
   if (model.startsWith('claude-opus-4')) return 'Opus 4.6';
   if (model.startsWith('claude-sonnet-4')) return 'Sonnet 4.6';
   if (model.startsWith('claude-haiku')) return 'Haiku';
+  if (session.backend === "opencode") {
+    const provider = session.modelProviderId ? `${session.modelProviderId} / ` : "";
+    return `OpenCode ${provider}${model}`;
+  }
   return model;
 }
 
@@ -219,16 +224,24 @@ export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
   const currentMode = session.permissionMode === 'default' ? 'plan' : (session.permissionMode || 'plan');
-  const modelLabelText = session.model ? friendlyModelName(session.model) : "";
+  const modelLabelText = session.model ? friendlyModelName(session) : "";
   const hasMessages = session.messages.length > 0;
+  const modeIsInteractive = session.backend === "claude";
   // Model is clickable only before first message is sent
   const modelClass = hasMessages ? "stat" : "stat model-stat--interactive";
   const modelDataAttrs = hasMessages ? "" : `data-session-id="${session.id}" data-action="show-model-picker"`;
   const modelTitle = hasMessages ? "" : "Click to change model (before first message)";
+  const modeClass = modeIsInteractive
+    ? `stat mode-stat mode-stat--${currentMode} mode-stat--interactive`
+    : `stat mode-stat mode-stat--${currentMode}`;
+  const modeAttrs = modeIsInteractive
+    ? `onclick="cycleMode('${session.id}')" title="${escapeHtml(modeTooltip(session.permissionMode))} (shift+tab)"`
+    : `title="Permission mode switching is only available for Claude SDK sessions"`;
+  const leadStatClass = modeIsInteractive ? modeClass : "stat";
+  const leadStatAttrs = modeIsInteractive ? modeAttrs : `title="OpenCode SDK session"`;
+  const leadStatText = modeIsInteractive ? modeLabel(session.permissionMode) : "OpenCode";
   return `<div class="stats-row">
-    <span class="stat mode-stat mode-stat--${currentMode} mode-stat--interactive"
-      onclick="cycleMode('${session.id}')"
-      title="${escapeHtml(modeTooltip(session.permissionMode))} (shift+tab)">${escapeHtml(modeLabel(session.permissionMode))}</span>
+    <span class="${leadStatClass}" ${leadStatAttrs}>${escapeHtml(leadStatText)}</span>
     <span class="stat-sep">·</span>
     <span class="stat">${formatTokens(totalTokens)}</span>
     <span class="stat-sep">·</span>
@@ -500,7 +513,7 @@ function renderUserMessage(msg: AgentMessage): string {
   }
 
   const trimmedText = text.trim();
-  return `<div class="message message--user" data-id="${msg.id}" title="User">
+  return `<div class="message message--user" id="${msg.id}" data-id="${msg.id}" title="User">
     <div class="message-content">${trimmedText ? escapeHtml(trimmedText) : ""}${attachmentsHtml}</div>
   </div>`;
 }
@@ -508,7 +521,7 @@ function renderUserMessage(msg: AgentMessage): string {
 function renderAssistantMessage(msg: AgentMessage): string {
   if (!msg.contentBlocks?.length) return "";
 
-  let html = `<div class="message message--assistant" data-id="${msg.id}" title="Assistant">
+  let html = `<div class="message message--assistant" id="${msg.id}" data-id="${msg.id}" title="Assistant">
     <div class="message-content">`;
 
   for (const block of msg.contentBlocks) {
@@ -787,7 +800,7 @@ function renderTaskToolResult(toolName: string, content: string): string {
 
 function renderResultMessage(msg: AgentMessage): string {
   if (msg.isError) {
-    return `<div class="message message--system message--error" data-id="${msg.id}" title="Error">
+    return `<div class="message message--system message--error" id="${msg.id}" data-id="${msg.id}" title="Error">
       <div class="message-content">${escapeHtml(msg.text ?? "Agent error")}</div>
     </div>`;
   }
@@ -810,7 +823,7 @@ export function renderTurnCompleteFooter(msg: AgentMessage): string {
 function renderSystemMessage(msg: AgentMessage): string {
   if (!msg.text) return "";
 
-  return `<div class="message message--system" data-id="${msg.id}" title="System">
+  return `<div class="message message--system" id="${msg.id}" data-id="${msg.id}" title="System">
     <div class="message-content">${escapeHtml(msg.text)}</div>
   </div>`;
 }
@@ -820,7 +833,11 @@ function renderSystemMessage(msg: AgentMessage): string {
 export function renderRawConversation(session: AgentSession, messages: AgentMessage[]): string {
   const lines: string[] = [];
   lines.push(`=== SESSION: ${session.repoName} (${session.id}) ===`);
+  lines.push(`Backend: ${session.backend}`);
   lines.push(`Model: ${session.model || "default"}`);
+  if (session.modelProviderId) {
+    lines.push(`Provider: ${session.modelProviderId}`);
+  }
   lines.push(`Mode: ${session.permissionMode || "default"}`);
   lines.push(`Created: ${session.createdAt.toISOString()}`);
   lines.push("");

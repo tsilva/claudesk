@@ -288,8 +288,19 @@
       temp.innerHTML = e.detail.data;
       var newMsg = temp.querySelector("[data-id]");
       if (newMsg) {
-        // Allow OOB swaps through — they replace existing elements in-place
-        if (newMsg.hasAttribute("hx-swap-oob")) return;
+        if (newMsg.hasAttribute("hx-swap-oob")) {
+          var existingTarget = document.querySelector(
+            '#conversation-stream [data-id="' + newMsg.getAttribute("data-id") + '"]'
+          );
+          if (!existingTarget) {
+            // OpenCode can emit a replace before the initial assistant node was ever rendered.
+            // Drop OOB mode so HTMX appends the first visible assistant message normally.
+            newMsg.removeAttribute("hx-swap-oob");
+            e.detail.data = temp.innerHTML;
+          } else {
+            return;
+          }
+        }
 
         // Replace optimistic user message with real server echo
         if (newMsg.classList.contains("message--user")) {
@@ -314,6 +325,9 @@
 
   document.body.addEventListener("htmx:afterSwap", function (e) {
     if (e.detail.target && e.detail.target.id === "session-detail") {
+      if (window.htmx) {
+        window.htmx.process(e.detail.target);
+      }
       var container = document.getElementById("conversation-stream");
       if (container) {
         scrollToNewest(container);
@@ -427,21 +441,94 @@
 
   // --- Model Selector Popup ---
 
-  var AVAILABLE_MODELS = [
-    { id: "claude-opus-4-6", label: "Opus 4.6", description: "Powerful — best for complex tasks" },
-    { id: "claude-sonnet-4-6", label: "Sonnet 4.6", description: "Fast & capable — great for most tasks" },
-    { id: "claude-opus-4-5", label: "Opus 4.5", description: "Previous generation Opus" },
-    { id: "claude-sonnet-4-5", label: "Sonnet 4.5", description: "Previous generation Sonnet" },
-    { id: "claude-haiku-4-5-20251001", label: "Haiku", description: "Fastest — for simple tasks" },
-  ];
-
   var activeModelPicker = null;
+  var modelCatalogPromise = null;
+  var modelCatalogCache = null;
+
+  function loadModelCatalog() {
+    if (modelCatalogCache) {
+      return Promise.resolve(modelCatalogCache);
+    }
+    if (modelCatalogPromise) {
+      return modelCatalogPromise;
+    }
+
+    modelCatalogPromise = fetch("/api/models")
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error("Failed to load models");
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        modelCatalogCache = data;
+        return data;
+      })
+      .finally(function () {
+        modelCatalogPromise = null;
+      });
+
+    return modelCatalogPromise;
+  }
+
+  function createModelOption(sessionId, model) {
+    var opt = document.createElement("button");
+    opt.className = "model-picker-option";
+    opt.type = "button";
+    opt.innerHTML =
+      '<span class="model-picker-label">' + escapeHtmlClient(model.label) + '</span>' +
+      '<span class="model-picker-desc">' + escapeHtmlClient(model.description) + '</span>';
+    opt.onclick = function (e) {
+      e.stopPropagation();
+      dismissModelPicker();
+      updateSessionModel(sessionId, model);
+    };
+    return opt;
+  }
+
+  function appendModelSection(popover, title, models, sessionId) {
+    if (!models || models.length === 0) return;
+
+    var section = document.createElement("div");
+    section.className = "model-picker-section";
+
+    var heading = document.createElement("div");
+    heading.className = "model-picker-section-title";
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    models.forEach(function (model) {
+      section.appendChild(createModelOption(sessionId, model));
+    });
+
+    popover.appendChild(section);
+  }
+
+  function renderModelPicker(popover, sessionId, catalog) {
+    popover.innerHTML = "";
+    appendModelSection(popover, "Claude SDK", catalog.claude || [], sessionId);
+    appendModelSection(popover, "OpenCode SDK", catalog.opencode || [], sessionId);
+
+    if (catalog.opencodeError) {
+      var note = document.createElement("div");
+      note.className = "model-picker-note";
+      note.textContent = "OpenCode unavailable: " + catalog.opencodeError;
+      popover.appendChild(note);
+    }
+
+    if (!popover.children.length) {
+      var empty = document.createElement("div");
+      empty.className = "model-picker-note";
+      empty.textContent = "No models available";
+      popover.appendChild(empty);
+    }
+  }
 
   window.showModelPicker = function (event, sessionId) {
     event.stopPropagation();
     dismissModelPicker();
 
-    var trigger = event.target;
+    var trigger = event.target && event.target.closest ? event.target.closest("[data-action='show-model-picker']") : event.target;
     var rect = trigger.getBoundingClientRect();
 
     var popover = document.createElement("div");
@@ -450,24 +537,21 @@
     popover.style.bottom = (window.innerHeight - rect.top + 4) + "px";
     popover.style.left = rect.left + "px";
     popover.style.zIndex = "9999";
-
-    AVAILABLE_MODELS.forEach(function (m) {
-      var opt = document.createElement("button");
-      opt.className = "model-picker-option";
-      opt.type = "button";
-      opt.innerHTML =
-        '<span class="model-picker-label">' + escapeHtmlClient(m.label) + '</span>' +
-        '<span class="model-picker-desc">' + escapeHtmlClient(m.description) + '</span>';
-      opt.onclick = function (e) {
-        e.stopPropagation();
-        dismissModelPicker();
-        updateSessionModel(sessionId, m.id);
-      };
-      popover.appendChild(opt);
-    });
+    popover.innerHTML = '<div class="model-picker-note">Loading models...</div>';
 
     document.body.appendChild(popover);
     activeModelPicker = popover;
+
+    loadModelCatalog()
+      .then(function (catalog) {
+        if (activeModelPicker !== popover) return;
+        renderModelPicker(popover, sessionId, catalog);
+      })
+      .catch(function (err) {
+        if (activeModelPicker !== popover) return;
+        popover.innerHTML = '<div class="model-picker-note">Failed to load models</div>';
+        console.error("Load models failed:", err);
+      });
   };
 
   function dismissModelPicker() {
@@ -479,8 +563,8 @@
 
   document.addEventListener("click", function (e) {
     // Handle model picker click via event delegation
-    var target = e.target;
-    if (target && target.getAttribute("data-action") === "show-model-picker") {
+    var target = e.target && e.target.closest ? e.target.closest("[data-action='show-model-picker']") : null;
+    if (target) {
       var sessionId = target.getAttribute("data-session-id");
       if (sessionId) {
         e.stopPropagation();
@@ -492,7 +576,11 @@
   });
 
   window.updateSessionModel = function (sessionId, model) {
-    postJson("/api/agents/" + sessionId + "/model", { model: model })
+    postJson("/api/agents/" + sessionId + "/model", {
+      backend: model.backend,
+      model: model.model,
+      modelProviderId: model.providerId
+    })
       .then(function (res) {
         if (res.ok) {
           // Refresh the session stats to show new model

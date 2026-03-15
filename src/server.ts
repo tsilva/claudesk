@@ -85,10 +85,16 @@ const agentManager = new AgentManager(
       broadcast("hook-status", JSON.stringify({ state: msg.hookStatus }), session.id);
       return;
     }
-    if (msg.permissionData || msg.questionData || msg.planApprovalData) {
+    const hasInteractivePrompt = Boolean(msg.permissionData || msg.questionData || msg.planApprovalData);
+    const shouldReplace = msg.uiAction === "replace"
+      || msg.permissionData?.resolved
+      || msg.questionData?.resolved
+      || msg.planApprovalData?.resolved;
+
+    if (hasInteractivePrompt || shouldReplace) {
       const html = renderMessage(msg);
       if (html) {
-        if (msg.permissionData?.resolved || msg.questionData?.resolved || msg.planApprovalData?.resolved) {
+        if (shouldReplace) {
           // Resolved: inject hx-swap-oob to replace existing element in-place
           // Use trimStart to handle any leading whitespace, then restore format
           const trimmed = html.trimStart();
@@ -102,7 +108,7 @@ const agentManager = new AgentManager(
         }
 
         // Desktop notification for pending prompts
-        if (!msg.permissionData?.resolved && !msg.questionData?.resolved && !msg.planApprovalData?.resolved) {
+        if (hasInteractivePrompt && !msg.permissionData?.resolved && !msg.questionData?.resolved && !msg.planApprovalData?.resolved) {
           const event = msg.planApprovalData ? "plan_approval" : msg.permissionData ? "permission" : "question";
           const logoUrl = await agentManager.getSessionLogoUrl(session.id);
           broadcast("notify", JSON.stringify({
@@ -397,7 +403,8 @@ app.delete("/sessions/:id", async (c) => {
 const VALID_PERMISSION_MODES = new Set([
   'default', 'acceptEdits', 'bypassPermissions', 'plan', 'delegate', 'dontAsk',
 ]);
-const VALID_MODEL_IDS = new Set([
+const VALID_BACKENDS = new Set(["claude", "opencode"]);
+const VALID_CLAUDE_MODEL_IDS = new Set([
   'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
   'claude-opus-4-5', 'claude-sonnet-4-5',
 ]);
@@ -406,8 +413,15 @@ const VALID_PRESETS = new Set(['opus', 'sonnet', 'opus-plan']);
 // Create a new session (no prompt required)
 app.post("/api/agents/launch", async (c) => {
   try {
-    const body = await c.req.json<{ cwd: string; model?: string; permissionMode?: string; preset?: string }>();
-    const { cwd, model, permissionMode, preset } = body;
+    const body = await c.req.json<{
+      cwd: string;
+      backend?: string;
+      model?: string;
+      modelProviderId?: string;
+      permissionMode?: string;
+      preset?: string;
+    }>();
+    const { cwd, backend, model, modelProviderId, permissionMode, preset } = body;
     if (!cwd) return c.json({ error: "cwd required" }, 400);
 
     // Validate cwd exists and is a directory
@@ -420,21 +434,35 @@ app.post("/api/agents/launch", async (c) => {
       return c.json({ error: "cwd does not exist" }, 400);
     }
 
+    if (backend && !VALID_BACKENDS.has(backend)) {
+      return c.json({ error: "invalid backend" }, 400);
+    }
     if (permissionMode && !VALID_PERMISSION_MODES.has(permissionMode)) {
       return c.json({ error: "invalid permissionMode" }, 400);
     }
-    if (model && !VALID_MODEL_IDS.has(model)) {
+    if ((backend ?? "claude") === "claude" && model && !VALID_CLAUDE_MODEL_IDS.has(model)) {
       return c.json({ error: "invalid model" }, 400);
     }
     if (preset && !VALID_PRESETS.has(preset)) {
       return c.json({ error: "invalid preset" }, 400);
     }
 
-    const session = agentManager.createSession(cwd, model, permissionMode as any, preset as any);
+    const session = agentManager.createSession(cwd, {
+      backend: (backend as any) ?? "claude",
+      model,
+      modelProviderId,
+      permissionMode: permissionMode as any,
+      preset: preset as any,
+    });
     return c.json({ ok: true, sessionId: session.id });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "launch failed" }, 500);
   }
+});
+
+app.get("/api/models", async (c) => {
+  const models = await agentManager.getAvailableModels();
+  return c.json(models);
 });
 
 // Send a follow-up message (supports multipart/form-data for file uploads)
@@ -570,19 +598,30 @@ app.post("/api/agents/:id/stop", async (c) => {
 app.post("/api/agents/:id/model", async (c) => {
   try {
     const id = c.req.param("id");
-    const { model } = await c.req.json<{ model: string }>();
+    const { backend, model, modelProviderId } = await c.req.json<{
+      backend: string;
+      model: string;
+      modelProviderId?: string;
+    }>();
 
+    if (!backend || !VALID_BACKENDS.has(backend)) {
+      return c.json({ error: "backend required" }, 400);
+    }
     if (!model) {
       return c.json({ error: "model required" }, 400);
     }
-    if (!VALID_MODEL_IDS.has(model)) {
+    if (backend === "claude" && !VALID_CLAUDE_MODEL_IDS.has(model)) {
       return c.json({ error: "invalid model" }, 400);
     }
 
     const session = agentManager.getSession(id);
     if (!session) return c.json({ error: "session not found" }, 404);
 
-    agentManager.setSessionModel(id, model);
+    agentManager.setSessionModel(id, {
+      backend: backend as any,
+      model,
+      modelProviderId,
+    });
     return c.json({ ok: true });
   } catch (err: unknown) {
     return c.json({ error: err instanceof Error ? err.message : "failed" }, 500);
@@ -616,6 +655,7 @@ await agentManager.init();
 
 export default {
   port: PORT,
+  idleTimeout: 60,
   fetch: app.fetch,
 };
 

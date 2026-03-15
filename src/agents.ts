@@ -1,7 +1,19 @@
 import { query, type Query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  createOpencodeClient,
+  createOpencodeServer,
+  type AssistantMessage as OpenCodeAssistantMessage,
+  type Event as OpenCodeEvent,
+  type GlobalEvent as OpenCodeGlobalEvent,
+  type OpencodeClient,
+  type Part as OpenCodePart,
+  type Permission as OpenCodePermission,
+  type Provider as OpenCodeProvider,
+} from "@opencode-ai/sdk";
 import { readdir, stat } from "fs/promises";
 import { join, basename } from "path";
 import type {
+  AgentBackend,
   AgentSession,
   AgentMessage,
   AgentStatus,
@@ -35,6 +47,58 @@ import { getReposDir, isRepoBlacklisted } from "./config.ts";
 const ARCHIVED_MARKER = ".archived.md";
 const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MESSAGE_WINDOW_LIMIT = 100; // Maximum messages to keep in memory per session
+const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6";
+const DEFAULT_OPENCODE_PROVIDER = "anthropic";
+const DEFAULT_OPENCODE_MODEL = "claude-sonnet-4-5";
+
+type OpencodeRuntime = {
+  client: OpencodeClient;
+  server: {
+    url: string;
+    close(): void;
+  };
+};
+
+type ModelOption = {
+  backend: AgentBackend;
+  model: string;
+  label: string;
+  description: string;
+  providerId?: string;
+};
+
+const CLAUDE_MODEL_OPTIONS: ModelOption[] = [
+  {
+    backend: "claude",
+    model: "claude-opus-4-6",
+    label: "Opus 4.6",
+    description: "Powerful, direct Claude SDK session",
+  },
+  {
+    backend: "claude",
+    model: "claude-sonnet-4-6",
+    label: "Sonnet 4.6",
+    description: "Fast and capable for most work",
+  },
+  {
+    backend: "claude",
+    model: "claude-opus-4-5",
+    label: "Opus 4.5",
+    description: "Previous generation Opus model",
+  },
+  {
+    backend: "claude",
+    model: "claude-sonnet-4-5",
+    label: "Sonnet 4.5",
+    description: "Previous generation Sonnet model",
+  },
+  {
+    backend: "claude",
+    model: "claude-haiku-4-5-20251001",
+    label: "Haiku",
+    description: "Fastest Claude option for simple tasks",
+  },
+];
 
 // --- Git Helpers ---
 
@@ -176,12 +240,18 @@ export class AgentManager {
   private sessions = new Map<string, AgentSession>();
   private queries = new Map<string, Query>();
   private abortControllers = new Map<string, AbortController>();
+  private sdkSessionLookup = new Map<string, string>();
   private onMessage: MessageCallback;
   private onSessionChange: SessionChangeCallback;
   private launchableRepos: LaunchableRepo[] = [];
   private lastBroadcast = new Map<string, number>();
   private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private cachedPendingCounts: Map<string, RepoGitStatus> = new Map();
+  private opencodeRuntime: OpencodeRuntime | null = null;
+  private opencodeRuntimePromise: Promise<OpencodeRuntime> | null = null;
+  private opencodeEventLoop: Promise<void> | null = null;
+  private opencodeParts = new Map<string, OpenCodePart[]>();
+  private opencodeMessageRoles = new Map<string, string>();
 
   constructor(onMessage: MessageCallback, onSessionChange: SessionChangeCallback) {
     this.onMessage = onMessage;
@@ -196,6 +266,30 @@ export class AgentManager {
     fireCallback(() => this.onSessionChange(this.getSessions()), "onSessionChange");
   }
 
+  private sdkLookupKey(backend: AgentBackend, sdkSessionId: string): string {
+    return `${backend}:${sdkSessionId}`;
+  }
+
+  private setSdkSessionId(session: AgentSession, sdkSessionId: string): void {
+    if (session.sdkSessionId) {
+      this.sdkSessionLookup.delete(this.sdkLookupKey(session.backend, session.sdkSessionId));
+    }
+    session.sdkSessionId = sdkSessionId;
+    this.sdkSessionLookup.set(this.sdkLookupKey(session.backend, sdkSessionId), session.id);
+  }
+
+  private getSessionBySdkSessionId(backend: AgentBackend, sdkSessionId: string): AgentSession | undefined {
+    const sessionId = this.sdkSessionLookup.get(this.sdkLookupKey(backend, sdkSessionId));
+    return sessionId ? this.sessions.get(sessionId) : undefined;
+  }
+
+  private unwrapData<T>(value: T | { data: T }): T {
+    if (value && typeof value === "object" && "data" in value) {
+      return value.data;
+    }
+    return value;
+  }
+
   // --- Initialization ---
 
   async init(): Promise<void> {
@@ -203,7 +297,19 @@ export class AgentManager {
     await this.scanLaunchableRepos();
     const restored = await loadAllSessions();
     for (const session of restored) {
+      session.backend = session.backend ?? "claude";
+      if (session.backend === "claude") {
+        this.lastUsedSelection.claude = { model: session.model };
+      } else {
+        this.lastUsedSelection.opencode = {
+          model: session.model || DEFAULT_OPENCODE_MODEL,
+          providerId: session.modelProviderId || DEFAULT_OPENCODE_PROVIDER,
+        };
+      }
       this.sessions.set(session.id, session);
+      if (session.sdkSessionId) {
+        this.sdkSessionLookup.set(this.sdkLookupKey(session.backend, session.sdkSessionId), session.id);
+      }
     }
     if (restored.length > 0) {
       console.log(`[persistence] restored ${restored.length} session(s)`);
@@ -241,17 +347,33 @@ export class AgentManager {
 
   // --- Public API ---
 
-  private lastUsedModel: string = "claude-opus-4-6";
+  private lastUsedSelection: Record<AgentBackend, { model: string; providerId?: string }> = {
+    claude: { model: DEFAULT_CLAUDE_MODEL },
+    opencode: { model: DEFAULT_OPENCODE_MODEL, providerId: DEFAULT_OPENCODE_PROVIDER },
+  };
 
-  createSession(cwd: string, model?: string, permissionMode?: PermissionMode, preset?: ModelPreset): AgentSession {
+  createSession(
+    cwd: string,
+    options?: {
+      backend?: AgentBackend;
+      model?: string;
+      modelProviderId?: string;
+      permissionMode?: PermissionMode;
+      preset?: ModelPreset;
+    },
+  ): AgentSession {
     const id = crypto.randomUUID();
     const repoName = basename(cwd);
-
-    // Use provided model, or fall back to last used model
-    const sessionModel = model || this.lastUsedModel;
+    const backend = options?.backend ?? "claude";
+    const defaultSelection = this.lastUsedSelection[backend];
+    const sessionModel = options?.model || defaultSelection.model;
+    const modelProviderId = backend === "opencode"
+      ? (options?.modelProviderId || defaultSelection.providerId || DEFAULT_OPENCODE_PROVIDER)
+      : undefined;
 
     const session: AgentSession = {
       id,
+      backend,
       sdkSessionId: "",
       repoName,
       cwd,
@@ -265,8 +387,9 @@ export class AgentManager {
       outputTokens: 0,
       turnCount: 0,
       model: sessionModel,
-      preset,
-      permissionMode: permissionMode || "plan",
+      modelProviderId,
+      preset: options?.preset,
+      permissionMode: options?.permissionMode || "plan",
       pendingQuestions: [],
       pendingPlanApproval: null,
       pendingPermissions: new Map(),
@@ -280,8 +403,18 @@ export class AgentManager {
     return session;
   }
 
-  async launch(cwd: string, prompt: string, model?: string, permissionMode?: PermissionMode, preset?: ModelPreset): Promise<AgentSession> {
-    const session = this.createSession(cwd, model, permissionMode, preset);
+  async launch(
+    cwd: string,
+    prompt: string,
+    options?: {
+      backend?: AgentBackend;
+      model?: string;
+      modelProviderId?: string;
+      permissionMode?: PermissionMode;
+      preset?: ModelPreset;
+    },
+  ): Promise<AgentSession> {
+    const session = this.createSession(cwd, options);
     await this.scanLaunchableRepos();
     await this.sendMessage(session.id, prompt);
     return session;
@@ -298,29 +431,7 @@ export class AgentManager {
       throw new Error("Session has been stopped");
     }
 
-    // Abort any lingering query before starting a new one
-    const existingController = this.abortControllers.get(sessionId);
-    if (existingController) {
-      existingController.abort();
-      this.abortControllers.delete(sessionId);
-    }
-    const existingQuery = this.queries.get(sessionId);
-    if (existingQuery) {
-      existingQuery.close();
-      this.queries.delete(sessionId);
-    }
-
-    const abortController = new AbortController();
-    this.abortControllers.set(sessionId, abortController);
-
-    // Check for visual content early
-    const hasVisualContent = attachments && attachments.some(a => 
-      a.type.startsWith("image/") || a.type === "application/pdf"
-    );
-
-    // Convert attachments to SDK format
     const userAttachments: import("./types.ts").Attachment[] = [];
-
     if (attachments && attachments.length > 0) {
       for (const att of attachments) {
         userAttachments.push({
@@ -333,26 +444,36 @@ export class AgentManager {
       }
     }
 
-    // Build raw request for raw mode
-    const rawRequest = hasVisualContent ? {
-      role: "user",
-      content: [
-        ...(text?.trim() ? [{ type: "text", text }] : []),
-        ...(attachments?.filter(a => a.type.startsWith("image/")).map(a => ({
-          type: "image",
-          source: { type: "base64" as const, media_type: a.type, data: a.data }
-        })) || []),
-        ...(attachments?.filter(a => a.type === "application/pdf").map(a => ({
-          type: "document",
-          source: { type: "base64" as const, media_type: "application/pdf", data: a.data }
-        })) || []),
-      ]
-    } : {
-      role: "user",
-      content: text || ""
-    };
+    const hasVisualContent = attachments?.some((a) =>
+      a.type.startsWith("image/") || a.type === "application/pdf"
+    ) ?? false;
+    if (session.backend === "opencode" && attachments && attachments.length > 0) {
+      throw new Error("OpenCode sessions do not support file attachments yet");
+    }
 
-    // Add user message
+    const rawRequest = session.backend === "claude"
+      ? (hasVisualContent ? {
+        role: "user",
+        content: [
+          ...(text?.trim() ? [{ type: "text", text }] : []),
+          ...(attachments?.filter((a) => a.type.startsWith("image/")).map((a) => ({
+            type: "image",
+            source: { type: "base64" as const, media_type: a.type, data: a.data },
+          })) || []),
+          ...(attachments?.filter((a) => a.type === "application/pdf").map((a) => ({
+            type: "document",
+            source: { type: "base64" as const, media_type: "application/pdf", data: a.data },
+          })) || []),
+        ],
+      } : {
+        role: "user",
+        content: text || "",
+      })
+      : {
+        backend: "opencode",
+        parts: text?.trim() ? [{ type: "text", text }] : [],
+      };
+
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
       type: "user",
@@ -368,55 +489,100 @@ export class AgentManager {
     session.turnStartedAt = session.lastActivity;
     session.status = "streaming";
 
-    // Track this model as the last used for future sessions
-    this.lastUsedModel = session.model;
+    this.lastUsedSelection[session.backend] = {
+      model: session.model,
+      providerId: session.modelProviderId,
+    };
 
     this.persistSession(sessionId);
     this.fireOnMessage(userMsg, session);
     this.fireOnSessionChange();
+    try {
+      if (session.backend === "claude") {
+        this.sendClaudeMessage(sessionId, session, text, attachments, hasVisualContent);
+      } else {
+        await this.sendOpencodeMessage(sessionId, session, text);
+      }
+    } catch (err) {
+      session.status = "error";
+      session.turnStartedAt = undefined;
+      const errorMsg: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "result",
+        timestamp: new Date(),
+        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+      };
+      this.pushMessage(session, errorMsg);
+      this.persistSession(sessionId, true);
+      this.fireOnMessage(errorMsg, session);
+      this.fireOnSessionChange();
+      throw err;
+    }
+  }
 
-    // Strip CLAUDECODE so the subprocess can run even inside a Claude Code session
+  private sendClaudeMessage(
+    sessionId: string,
+    session: AgentSession,
+    text: string,
+    attachments: { name: string; type: string; size: number; data: string }[] | undefined,
+    hasVisualContent: boolean,
+  ): void {
+    const existingController = this.abortControllers.get(sessionId);
+    if (existingController) {
+      existingController.abort();
+      this.abortControllers.delete(sessionId);
+    }
+    const existingQuery = this.queries.get(sessionId);
+    if (existingQuery) {
+      existingQuery.close();
+      this.queries.delete(sessionId);
+    }
+
+    const abortController = new AbortController();
+    this.abortControllers.set(sessionId, abortController);
+
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    // First message: start new query; follow-up: resume existing session
     const options: Record<string, unknown> = {
       cwd: session.cwd,
       model: session.model,
       abortController,
       permissionMode: session.permissionMode,
       env,
-      settingSources: ['user', 'project', 'local'],
+      settingSources: ["user", "project", "local"],
       canUseTool: (toolName: string, input: unknown, opts: { toolUseID: string; suggestions?: unknown[] }) => {
-        return this.handleCanUseTool(sessionId, toolName, input as Record<string, unknown>, opts.toolUseID, opts.suggestions as PermissionUpdate[] | undefined);
+        return this.handleCanUseTool(
+          sessionId,
+          toolName,
+          input as Record<string, unknown>,
+          opts.toolUseID,
+          opts.suggestions as PermissionUpdate[] | undefined,
+        );
       },
     };
-    if (session.permissionMode === 'bypassPermissions') {
+    if (session.permissionMode === "bypassPermissions") {
       options.allowDangerouslySkipPermissions = true;
     }
     if (session.sdkSessionId) {
       options.resume = session.sdkSessionId;
     }
 
-    // Build prompt - use streaming input for images/documents, string for text-only
     let prompt;
-    
     if (hasVisualContent) {
-      // Use streaming input mode for multimodal messages (images + PDFs)
-      const imageAttachments = attachments!.filter(a => a.type.startsWith("image/"));
-      const pdfAttachments = attachments!.filter(a => a.type === "application/pdf");
-      
-      const content: Array<{ 
-        type: string; 
-        text?: string; 
-        source?: { type: string; media_type: string; data: string } 
+      const imageAttachments = attachments!.filter((a) => a.type.startsWith("image/"));
+      const pdfAttachments = attachments!.filter((a) => a.type === "application/pdf");
+      const content: Array<{
+        type: string;
+        text?: string;
+        source?: { type: string; media_type: string; data: string };
       }> = [];
-      
+
       if (text?.trim()) {
         content.push({ type: "text", text });
       }
-      
-      // Add image content blocks
+
       for (const img of imageAttachments) {
         content.push({
           type: "image",
@@ -427,8 +593,7 @@ export class AgentManager {
           },
         });
       }
-      
-      // Add PDF document content blocks
+
       for (const pdf of pdfAttachments) {
         content.push({
           type: "document",
@@ -439,8 +604,7 @@ export class AgentManager {
           },
         });
       }
-      
-      // Create async generator for streaming input
+
       async function* messageGenerator() {
         yield {
           type: "user" as const,
@@ -452,17 +616,45 @@ export class AgentManager {
           session_id: "",
         };
       }
-      
+
       prompt = messageGenerator();
     } else {
-      // Simple text-only message
       prompt = text || "";
     }
 
     const q = query({ prompt, options });
-
     this.queries.set(sessionId, q);
     this.consumeStream(sessionId, q);
+  }
+
+  private async sendOpencodeMessage(sessionId: string, session: AgentSession, text: string): Promise<void> {
+    const runtime = await this.ensureOpencodeRuntime();
+    if (!session.sdkSessionId) {
+      const createdResponse = await runtime.client.session.create({
+        query: { directory: session.cwd },
+        body: { title: session.repoName },
+        responseStyle: "data",
+        throwOnError: true,
+      });
+      const created = this.unwrapData(createdResponse);
+      this.setSdkSessionId(session, created.id);
+      session.lastActivity = new Date(created.time.updated);
+      this.persistSession(sessionId, true);
+    }
+
+    await runtime.client.session.promptAsync({
+      path: { id: session.sdkSessionId },
+      query: { directory: session.cwd },
+      body: {
+        model: {
+          providerID: session.modelProviderId || DEFAULT_OPENCODE_PROVIDER,
+          modelID: session.model,
+        },
+        parts: text?.trim() ? [{ type: "text", text }] : [],
+      },
+      responseStyle: "data",
+      throwOnError: true,
+    });
   }
 
   respondToPermission(sessionId: string, allow: boolean, message?: string, toolUseId?: string): void {
@@ -499,6 +691,13 @@ export class AgentManager {
     // Only transition to streaming if no more pending permissions/questions/plan approvals
     this.resumeIfNoPending(session);
     this.fireOnSessionChange();
+
+    if (pending.backend === "opencode") {
+      this.resolveOpencodePermission(session, pending.toolUseId, allow).catch((err) =>
+        console.warn(`[opencode] permission reply failed:`, err)
+      );
+      return;
+    }
 
     if (allow) {
       pending.resolve({ behavior: "allow" });
@@ -651,6 +850,12 @@ export class AgentManager {
       this.queries.delete(sessionId);
     }
 
+    if (session.backend === "opencode" && session.sdkSessionId) {
+      this.abortOpencodeSession(session).catch((err) =>
+        console.warn(`[opencode] abort failed:`, err)
+      );
+    }
+
     this.resolveAllPending(session, "Agent stopped");
 
     // Clear persist timers
@@ -669,21 +874,35 @@ export class AgentManager {
     if (!session) throw new Error("Session not found");
     session.permissionMode = mode;
     const q = this.queries.get(sessionId);
-    if (q && typeof q.setPermissionMode === "function") {
+    if (session.backend === "claude" && q && typeof q.setPermissionMode === "function") {
       await q.setPermissionMode(mode);
     }
     this.persistSession(sessionId, true);
     this.fireOnSessionChange();
   }
 
-  setSessionModel(sessionId: string, model: string): void {
+  setSessionModel(
+    sessionId: string,
+    options: { backend: AgentBackend; model: string; modelProviderId?: string },
+  ): void {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session not found");
     // Only allow changing model before first message is sent
     if (session.messages.length > 0) {
       throw new Error("Cannot change model after conversation has started");
     }
-    session.model = model;
+    session.backend = options.backend;
+    session.model = options.model;
+    session.modelProviderId = options.backend === "opencode"
+      ? (options.modelProviderId || DEFAULT_OPENCODE_PROVIDER)
+      : undefined;
+    if (options.backend !== "claude") {
+      session.preset = undefined;
+    }
+    this.lastUsedSelection[session.backend] = {
+      model: session.model,
+      providerId: session.modelProviderId,
+    };
     this.persistSession(sessionId, true);
     this.fireOnSessionChange();
   }
@@ -711,6 +930,9 @@ export class AgentManager {
     this.queries.delete(sessionId);
     this.abortControllers.delete(sessionId);
     this.lastBroadcast.delete(sessionId);
+    if (session.sdkSessionId) {
+      this.sdkSessionLookup.delete(this.sdkLookupKey(session.backend, session.sdkSessionId));
+    }
 
     this.fireOnSessionChange();
     return true;
@@ -785,6 +1007,483 @@ export class AgentManager {
     return session.messages.slice(-count);
   }
 
+  async getAvailableModels(): Promise<{ claude: ModelOption[]; opencode: ModelOption[]; opencodeError?: string }> {
+    const result: { claude: ModelOption[]; opencode: ModelOption[]; opencodeError?: string } = {
+      claude: CLAUDE_MODEL_OPTIONS,
+      opencode: [],
+    };
+
+    try {
+      const runtime = await this.ensureOpencodeRuntime();
+      const providersResponse = await runtime.client.config.providers({
+        responseStyle: "data",
+        throwOnError: true,
+      });
+      const providers = this.unwrapData(providersResponse);
+      result.opencode = this.buildOpencodeModelOptions(providers.providers);
+    } catch (err) {
+      result.opencodeError = err instanceof Error ? err.message : String(err);
+    }
+
+    return result;
+  }
+
+  private buildOpencodeModelOptions(providers: OpenCodeProvider[]): ModelOption[] {
+    const options: ModelOption[] = [];
+    for (const provider of providers) {
+      const models = Object.values(provider.models)
+        .filter((model) => model.status !== "deprecated")
+        .sort((a, b) => a.name.localeCompare(b.name));
+      for (const model of models) {
+        options.push({
+          backend: "opencode",
+          providerId: provider.id,
+          model: model.id,
+          label: `${provider.name} / ${model.name}`,
+          description: `OpenCode via ${provider.name}`,
+        });
+      }
+    }
+    return options;
+  }
+
+  private async ensureOpencodeRuntime(): Promise<OpencodeRuntime> {
+    if (this.opencodeRuntime) {
+      return this.opencodeRuntime;
+    }
+    if (this.opencodeRuntimePromise) {
+      return this.opencodeRuntimePromise;
+    }
+
+    this.opencodeRuntimePromise = (async () => {
+      // Use an ephemeral port so dev reloads don't collide with a stale local server.
+      const server = await createOpencodeServer({ port: 0 });
+      const client = createOpencodeClient({ baseUrl: server.url });
+      const runtime: OpencodeRuntime = { client, server };
+      const { stream } = await client.global.event({
+        responseStyle: "data",
+        throwOnError: true,
+      });
+
+      this.opencodeRuntime = runtime;
+      this.opencodeEventLoop = this.consumeOpencodeEvents(stream as AsyncGenerator<OpenCodeGlobalEvent, unknown, unknown>)
+        .catch((err) => console.warn("[opencode] event stream failed:", err))
+        .finally(() => {
+          this.opencodeEventLoop = null;
+        });
+      return runtime;
+    })().catch((err) => {
+      this.opencodeRuntimePromise = null;
+      this.opencodeRuntime = null;
+      throw err;
+    });
+
+    return this.opencodeRuntimePromise;
+  }
+
+  private async consumeOpencodeEvents(stream: AsyncGenerator<OpenCodeGlobalEvent, unknown, unknown>): Promise<void> {
+    for await (const event of stream) {
+      if (!event?.payload) continue;
+      await this.handleOpencodeEvent(event.payload);
+    }
+  }
+
+  private async handleOpencodeEvent(event: OpenCodeEvent): Promise<void> {
+    switch (event.type) {
+      case "session.status": {
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        if (!session) break;
+        if (event.properties.status.type === "busy") {
+          if (session.status !== "needs_input") {
+            session.status = "streaming";
+          }
+        } else if (event.properties.status.type === "idle" && session.pendingPermissions.size === 0) {
+          session.status = "idle";
+          session.turnStartedAt = undefined;
+        }
+        this.persistSession(session.id);
+        this.fireOnSessionChange();
+        break;
+      }
+
+      case "session.idle": {
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        if (!session) break;
+        if (session.pendingPermissions.size === 0) {
+          session.status = "idle";
+          session.turnStartedAt = undefined;
+        }
+        this.persistSession(session.id);
+        this.fireOnSessionChange();
+        break;
+      }
+
+      case "session.updated": {
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.info.id);
+        if (!session) break;
+        session.lastActivity = new Date(event.properties.info.time.updated);
+        this.persistSession(session.id);
+        this.fireOnSessionChange();
+        break;
+      }
+
+      case "message.updated": {
+        this.opencodeMessageRoles.set(event.properties.info.id, event.properties.info.role);
+        if (event.properties.info.role !== "assistant") {
+          break;
+        }
+        const info = event.properties.info as OpenCodeAssistantMessage;
+        const session = this.getSessionBySdkSessionId("opencode", info.sessionID);
+        if (!session) break;
+        this.upsertOpencodeAssistantMessage(session, info.id, info.time.created, info);
+        if (info.time.completed || info.error) {
+          this.upsertOpencodeResultMessage(session, info);
+        }
+        break;
+      }
+
+      case "message.part.updated": {
+        const role = this.opencodeMessageRoles.get(event.properties.part.messageID);
+        if (role !== "assistant") break;
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.part.sessionID);
+        if (!session) break;
+        const parts = this.opencodeParts.get(event.properties.part.messageID) ?? [];
+        const existingIndex = parts.findIndex((part) => part.id === event.properties.part.id);
+        if (existingIndex >= 0) {
+          parts[existingIndex] = event.properties.part;
+        } else {
+          parts.push(event.properties.part);
+        }
+        this.opencodeParts.set(event.properties.part.messageID, parts);
+        this.upsertOpencodeAssistantMessage(session, event.properties.part.messageID, Date.now());
+        break;
+      }
+
+      case "permission.updated": {
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        if (!session) break;
+        this.applyOpencodePermissionUpdated(session, event.properties);
+        break;
+      }
+
+      case "permission.replied": {
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        if (!session) break;
+        this.applyOpencodePermissionReplied(session, event.properties.permissionID, event.properties.response);
+        break;
+      }
+
+      case "session.error": {
+        if (!event.properties.sessionID) break;
+        const session = this.getSessionBySdkSessionId("opencode", event.properties.sessionID);
+        if (!session) break;
+        session.status = "error";
+        const errorMsg: AgentMessage = {
+          id: crypto.randomUUID(),
+          type: "result",
+          timestamp: new Date(),
+          text: `Error: ${event.properties.error?.data.message || "OpenCode session failed"}`,
+          isError: true,
+        };
+        this.pushMessage(session, errorMsg);
+        this.persistSession(session.id, true);
+        this.fireOnMessage(errorMsg, session);
+        this.fireOnSessionChange();
+        break;
+      }
+    }
+  }
+
+  private applyOpencodePermissionUpdated(session: AgentSession, permission: OpenCodePermission): void {
+    const existing = session.pendingPermissions.get(permission.id);
+    if (existing) {
+      clearTimeout(existing.timeoutId);
+    }
+
+    const toolInput: Record<string, unknown> = {
+      type: permission.type,
+      pattern: permission.pattern,
+      ...permission.metadata,
+    };
+    const timeoutId = setTimeout(() => {
+      session.pendingPermissions.delete(permission.id);
+      this.resumeIfNoPending(session);
+      const permMsg = session.messages.find((m) => m.id === `perm-${permission.id}`);
+      if (permMsg?.permissionData) {
+        permMsg.permissionData.resolved = "timed_out";
+        permMsg.uiAction = "replace";
+        this.fireOnMessage(permMsg, session);
+      }
+      this.fireOnSessionChange();
+    }, PERMISSION_TIMEOUT_MS);
+
+    session.pendingPermissions.set(permission.id, {
+      backend: "opencode",
+      toolUseId: permission.id,
+      toolName: permission.title || permission.type,
+      toolInput,
+      resolve: () => {},
+      timeoutId,
+    });
+    session.status = "needs_input";
+
+    const existingMsg = session.messages.find((m) => m.id === `perm-${permission.id}`);
+    if (existingMsg?.permissionData) {
+      existingMsg.timestamp = new Date(permission.time.created);
+      existingMsg.permissionData.toolName = permission.title || permission.type;
+      existingMsg.permissionData.toolInput = toolInput;
+      existingMsg.uiAction = "replace";
+      this.fireOnMessage(existingMsg, session);
+    } else {
+      const permMsg: AgentMessage = {
+        id: `perm-${permission.id}`,
+        type: "system",
+        timestamp: new Date(permission.time.created),
+        text: `Permission requested: ${permission.title || permission.type}`,
+        sessionId: session.id,
+        permissionData: {
+          toolName: permission.title || permission.type,
+          toolInput,
+          toolUseId: permission.id,
+        },
+      };
+      this.pushMessage(session, permMsg);
+      this.fireOnMessage(permMsg, session);
+    }
+
+    this.persistSession(session.id);
+    this.fireOnSessionChange();
+  }
+
+  private applyOpencodePermissionReplied(session: AgentSession, permissionId: string, response: string): void {
+    const pending = session.pendingPermissions.get(permissionId);
+    if (pending) {
+      clearTimeout(pending.timeoutId);
+      session.pendingPermissions.delete(permissionId);
+    }
+
+    const permMsg = session.messages.find((m) => m.id === `perm-${permissionId}`);
+    if (permMsg?.permissionData) {
+      permMsg.permissionData.resolved = response === "reject" ? "denied" : "allowed";
+      permMsg.uiAction = "replace";
+      this.fireOnMessage(permMsg, session);
+    }
+
+    this.resumeIfNoPending(session);
+    this.persistSession(session.id);
+    this.fireOnSessionChange();
+  }
+
+  private upsertOpencodeAssistantMessage(
+    session: AgentSession,
+    messageId: string,
+    createdAt: number,
+    info?: OpenCodeAssistantMessage,
+  ): void {
+    const contentBlocks = this.buildOpencodeContentBlocks(messageId);
+    const text = contentBlocks
+      .filter((block) => block.type === "text" && block.text)
+      .map((block) => block.text!.trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+    const rawResponse = {
+      backend: "opencode",
+      info,
+      parts: this.opencodeParts.get(messageId) ?? [],
+    };
+    let agentMsg = session.messages.find((msg) => msg.id === messageId && msg.type === "assistant");
+    if (!agentMsg) {
+      agentMsg = {
+        id: messageId,
+        type: "assistant",
+        timestamp: new Date(createdAt),
+        contentBlocks,
+        text,
+        rawResponse,
+      };
+      this.pushMessage(session, agentMsg);
+      this.persistSession(session.id);
+      this.fireOnMessage(agentMsg, session);
+    } else {
+      agentMsg.timestamp = new Date(createdAt);
+      agentMsg.contentBlocks = contentBlocks;
+      agentMsg.text = text;
+      agentMsg.rawResponse = rawResponse;
+      agentMsg.uiAction = "replace";
+      this.persistSession(session.id);
+      this.fireOnMessage(agentMsg, session);
+    }
+
+    if (text) {
+      session.lastMessagePreview = text.slice(0, 80);
+    }
+    if (info) {
+      session.lastActivity = new Date(info.time.completed ?? info.time.created);
+      if (!info.error && !session.pendingPermissions.size) {
+        session.status = info.time.completed ? "idle" : "streaming";
+      }
+      if (info.modelID) {
+        session.model = info.modelID;
+      }
+      if (info.providerID) {
+        session.modelProviderId = info.providerID;
+      }
+    }
+    this.fireOnSessionChange();
+  }
+
+  private buildOpencodeContentBlocks(messageId: string): ContentBlock[] {
+    const parts = this.opencodeParts.get(messageId) ?? [];
+    const blocks: ContentBlock[] = [];
+
+    for (const part of parts) {
+      switch (part.type) {
+        case "text":
+          blocks.push({ type: "text", text: part.text, partId: part.id });
+          break;
+
+        case "reasoning":
+          blocks.push({ type: "thinking", text: part.text, partId: part.id });
+          break;
+
+        case "tool":
+          blocks.push({
+            type: "tool_use",
+            toolName: part.tool,
+            toolInput: part.state.input,
+            toolUseId: part.callID,
+            partId: `${part.id}:tool`,
+          });
+          if (part.state.status === "completed") {
+            blocks.push({
+              type: "tool_result",
+              toolName: part.tool,
+              toolUseId: part.callID,
+              content: part.state.output,
+              partId: `${part.id}:result`,
+            });
+          } else if (part.state.status === "error") {
+            blocks.push({
+              type: "tool_result",
+              toolName: part.tool,
+              toolUseId: part.callID,
+              content: part.state.error,
+              isError: true,
+              partId: `${part.id}:result`,
+            });
+          }
+          break;
+
+        case "file":
+          if (part.mime.startsWith("image/") && part.url.startsWith("data:") && part.url.includes(";base64,")) {
+            const [, payload] = part.url.split(";base64,");
+            if (payload) {
+              blocks.push({
+                type: "image",
+                partId: part.id,
+                source: {
+                  type: "base64",
+                  media_type: part.mime,
+                  data: payload,
+                },
+              });
+            }
+          }
+          break;
+
+        case "patch":
+          if (part.files.length > 0) {
+            blocks.push({
+              type: "tool_result",
+              toolName: "Patch",
+              content: `Updated files:\n${part.files.join("\n")}`,
+              partId: part.id,
+            });
+          }
+          break;
+      }
+    }
+
+    return blocks;
+  }
+
+  private formatOpencodeErrorMessage(info: OpenCodeAssistantMessage): string {
+    const error = info.error;
+    if (!error) {
+      return "OpenCode session failed";
+    }
+    if ("data" in error && error.data && typeof error.data === "object" && "message" in error.data && typeof error.data.message === "string") {
+      return error.data.message;
+    }
+    return error.name || "OpenCode session failed";
+  }
+
+  private upsertOpencodeResultMessage(session: AgentSession, info: OpenCodeAssistantMessage): void {
+    const resultId = `result-${info.id}`;
+    let resultMsg = session.messages.find((msg) => msg.id === resultId && msg.type === "result");
+    const timestamp = new Date(info.time.completed ?? Date.now());
+    const isError = Boolean(info.error);
+    const resultText = isError ? this.formatOpencodeErrorMessage(info) : "Done";
+
+    if (!resultMsg) {
+      session.totalCostUsd += info.cost || 0;
+      session.inputTokens += info.tokens.input || 0;
+      session.outputTokens += info.tokens.output || 0;
+      session.turnCount += 1;
+      resultMsg = {
+        id: resultId,
+        type: "result",
+        timestamp,
+        durationMs: session.turnStartedAt
+          ? Math.max(0, timestamp.getTime() - session.turnStartedAt.getTime())
+          : undefined,
+        costUsd: info.cost || 0,
+        inputTokens: info.tokens.input || 0,
+        outputTokens: info.tokens.output || 0,
+        numTurns: 1,
+        text: resultText,
+        isError,
+      };
+      this.pushMessage(session, resultMsg);
+    } else {
+      resultMsg.timestamp = timestamp;
+      resultMsg.text = resultText;
+      resultMsg.isError = isError;
+      resultMsg.uiAction = "replace";
+    }
+
+    session.status = isError ? "error" : (session.pendingPermissions.size > 0 ? "needs_input" : "idle");
+    session.turnStartedAt = undefined;
+    this.persistSession(session.id);
+    this.fireOnMessage(resultMsg!, session);
+    this.fireOnSessionChange();
+  }
+
+  private async resolveOpencodePermission(session: AgentSession, permissionId: string, allow: boolean): Promise<void> {
+    const runtime = await this.ensureOpencodeRuntime();
+    await runtime.client.postSessionIdPermissionsPermissionId({
+      path: {
+        id: session.sdkSessionId,
+        permissionID: permissionId,
+      },
+      query: { directory: session.cwd },
+      body: { response: allow ? "once" : "reject" },
+      responseStyle: "data",
+      throwOnError: true,
+    });
+  }
+
+  private async abortOpencodeSession(session: AgentSession): Promise<void> {
+    const runtime = await this.ensureOpencodeRuntime();
+    await runtime.client.session.abort({
+      path: { id: session.sdkSessionId },
+      query: { directory: session.cwd },
+      responseStyle: "data",
+      throwOnError: true,
+    });
+  }
+
   // --- Stream Consumer ---
 
   private async consumeStream(sessionId: string, q: Query): Promise<void> {
@@ -836,7 +1535,7 @@ export class AgentManager {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
-          session.sdkSessionId = msg.session_id;
+          this.setSdkSessionId(session, msg.session_id);
           session.status = "streaming";
           const initModel = (msg as SDKSystemInitMessage).model;
           // Accept whatever model the SDK resolved (may include version suffix)
@@ -1074,6 +1773,7 @@ export class AgentManager {
       }, PERMISSION_TIMEOUT_MS);
 
       session.pendingPermissions.set(toolUseId, {
+        backend: "claude",
         toolUseId,
         toolName,
         toolInput: input,

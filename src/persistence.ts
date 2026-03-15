@@ -14,7 +14,7 @@ export async function ensureDataDir(): Promise<void> {
 }
 
 function serializeMessage(m: AgentMessage): PersistedMessage {
-  const { hookStatus, rawRequest, rawResponse, ...rest } = m;
+  const { hookStatus, rawRequest, rawResponse, uiAction, ...rest } = m;
   return { ...rest, timestamp: m.timestamp.toISOString() };
 }
 

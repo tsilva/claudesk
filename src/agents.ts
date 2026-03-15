@@ -435,11 +435,19 @@ export class AgentManager {
           providerID: session.modelProviderId || DEFAULT_OPENCODE_PROVIDER,
           modelID: session.model,
         },
+        agent: this.getOpencodeAgentForMode(session.permissionMode),
         parts: text?.trim() ? [{ type: "text", text }] : [],
       },
       responseStyle: "data",
       throwOnError: true,
     });
+  }
+
+  private getOpencodeAgentForMode(mode: PermissionMode): "plan" | "build" {
+    if (mode === "plan" || mode === "default") {
+      return "plan";
+    }
+    return "build";
   }
 
   respondToPermission(sessionId: string, allow: boolean, message?: string, toolUseId?: string): void {

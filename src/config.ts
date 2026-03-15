@@ -3,24 +3,30 @@ import { join } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 
-const CONFIG_DIR = join(homedir(), ".claudesk");
+const CONFIG_DIR = join(homedir(), ".maestro");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const LEGACY_CONFIG_DIR = join(homedir(), ".claudesk");
+const LEGACY_CONFIG_FILE = join(LEGACY_CONFIG_DIR, "config.json");
 
-interface ClaudeskConfig {
+interface MaestroConfig {
   repos: string;
   repoBlacklistPatterns?: string[];
 }
 
-async function readConfig(): Promise<ClaudeskConfig | null> {
+async function readConfigFile(path: string): Promise<MaestroConfig | null> {
   try {
-    const raw = await readFile(CONFIG_FILE, "utf-8");
-    return JSON.parse(raw) as ClaudeskConfig;
+    const raw = await readFile(path, "utf-8");
+    return JSON.parse(raw) as MaestroConfig;
   } catch {
     return null;
   }
 }
 
-async function saveConfig(config: ClaudeskConfig): Promise<void> {
+async function readConfig(): Promise<MaestroConfig | null> {
+  return (await readConfigFile(CONFIG_FILE)) ?? (await readConfigFile(LEGACY_CONFIG_FILE));
+}
+
+async function saveConfig(config: MaestroConfig): Promise<void> {
   await mkdir(CONFIG_DIR, { recursive: true });
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
 }
@@ -35,8 +41,8 @@ async function prompt(question: string): Promise<string> {
   });
 }
 
-async function setupConfig(): Promise<ClaudeskConfig> {
-  process.stdout.write("\nWelcome to claudesk!\n\n");
+async function setupConfig(): Promise<MaestroConfig> {
+  process.stdout.write("\nWelcome to maestro!\n\n");
   process.stdout.write("Where are your git repos?\n");
 
   let reposPath = "";
@@ -62,7 +68,7 @@ async function setupConfig(): Promise<ClaudeskConfig> {
     }
   }
 
-  const config: ClaudeskConfig = { repos: reposPath };
+  const config: MaestroConfig = { repos: reposPath };
   await saveConfig(config);
   process.stdout.write(`\nConfig saved to ${CONFIG_FILE}\n\n`);
   return config;

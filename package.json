@@ -1,10 +1,11 @@
 {
-  "name": "claudesk",
+  "name": "maestro",
   "version": "0.1.0",
   "description": "Interactive dashboard for managing OpenCode agent sessions",
   "module": "src/server.ts",
   "type": "module",
   "bin": {
+    "maestro": "./bin/claudesk.mjs",
     "claudesk": "./bin/claudesk.mjs"
   },
   "files": [

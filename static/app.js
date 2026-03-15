@@ -1,4 +1,4 @@
-// claudesk client-side JS
+// maestro client-side JS
 // Handles: notifications, SSE session switching, connection status, agent interaction
 
 (function () {
@@ -85,21 +85,21 @@
 
   function enableNotifications() {
     notificationsEnabled = true;
-    localStorage.setItem("claudesk-notifications", "on");
+    localStorage.setItem(NOTIFICATION_PREF_KEY, "on");
     var status = document.getElementById("notif-status");
     if (status) status.textContent = "On";
   }
 
   function disableNotifications() {
     notificationsEnabled = false;
-    localStorage.setItem("claudesk-notifications", "off");
+    localStorage.setItem(NOTIFICATION_PREF_KEY, "off");
     var status = document.getElementById("notif-status");
     if (status) status.textContent = "Off";
   }
 
   // Restore notification preference from localStorage, falling back to browser permission
   if ("Notification" in window) {
-    var savedNotifPref = localStorage.getItem("claudesk-notifications");
+    var savedNotifPref = localStorage.getItem(NOTIFICATION_PREF_KEY) || localStorage.getItem(LEGACY_NOTIFICATION_PREF_KEY);
     if (savedNotifPref === "on" && Notification.permission === "granted") {
       enableNotifications();
     } else if (savedNotifPref === "off") {
@@ -129,7 +129,7 @@
       // Skip if we already showed this notification
       if (seenNotifications.has(key)) return;
 
-      var title = "claudesk";
+      var title = "maestro";
       var body = "";
 
       if (data.event === "plan_approval") {
@@ -151,7 +151,7 @@
 
         var n = new Notification(title, {
           body: body,
-          tag: "claudesk-" + sid,
+          tag: "maestro-" + sid,
           silent: false,
           icon: data.logoUrl || undefined,
         });
@@ -481,6 +481,7 @@
 
   var activeModelPickerSessionId = null;
   var lastModelPickerTrigger = null;
+  var activeModelPickerSelection = null;
   var modelCatalogPromise = null;
   var modelCatalogCache = null;
 
@@ -490,6 +491,10 @@
 
   function getModelModalContent() {
     return document.getElementById("model-modal-content");
+  }
+
+  function getModelModalSearch() {
+    return document.getElementById("model-modal-search");
   }
 
   function getModelModalSessionText(sessionId) {
@@ -575,6 +580,17 @@
     return opt;
   }
 
+  function matchesModelSearch(model, query) {
+    if (!query) return true;
+    var haystack = [
+      model.label,
+      model.description,
+      model.providerId || "",
+      model.model || ""
+    ].join(" ").toLowerCase();
+    return haystack.indexOf(query) >= 0;
+  }
+
   function appendModelSection(container, title, models, sessionId, currentSelection) {
     if (!models || models.length === 0) return;
 
@@ -593,9 +609,13 @@
     container.appendChild(section);
   }
 
-  function renderModelPicker(container, sessionId, catalog, currentSelection) {
+  function renderModelPicker(container, sessionId, catalog, currentSelection, query) {
     container.innerHTML = "";
-    appendModelSection(container, "OpenCode SDK", catalog.opencode || [], sessionId, currentSelection);
+    var normalizedQuery = (query || "").trim().toLowerCase();
+    var filteredModels = (catalog.opencode || []).filter(function (model) {
+      return matchesModelSearch(model, normalizedQuery);
+    });
+    appendModelSection(container, "OpenCode SDK", filteredModels, sessionId, currentSelection);
 
     if (catalog.opencodeError) {
       var note = document.createElement("div");
@@ -607,9 +627,22 @@
     if (!container.children.length) {
       var empty = document.createElement("div");
       empty.className = "model-modal-note";
-      empty.textContent = "No models available";
+      empty.textContent = normalizedQuery ? "No models match your search" : "No models available";
       container.appendChild(empty);
     }
+  }
+
+  function rerenderActiveModelPicker() {
+    var content = getModelModalContent();
+    var search = getModelModalSearch();
+    if (!content || !modelCatalogCache || !activeModelPickerSessionId || !activeModelPickerSelection) return;
+    renderModelPicker(
+      content,
+      activeModelPickerSessionId,
+      modelCatalogCache,
+      activeModelPickerSelection,
+      search ? search.value : ""
+    );
   }
 
   window.showModelPicker = function (event, sessionId) {
@@ -617,24 +650,32 @@
     var trigger = event.target && event.target.closest ? event.target.closest("[data-action='show-model-picker']") : event.target;
     var modal = getModelModal();
     var content = getModelModalContent();
+    var search = getModelModalSearch();
     var currentSelection = getCurrentModelSelection(trigger);
     if (!modal || !content) return;
 
     activeModelPickerSessionId = sessionId;
     lastModelPickerTrigger = trigger || null;
+    activeModelPickerSelection = currentSelection;
     setModelModalMeta(sessionId, currentSelection);
+    if (search) {
+      search.value = "";
+    }
     content.innerHTML = '<div class="model-modal-note">Loading models...</div>';
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("model-modal-open");
     requestAnimationFrame(function () {
       modal.classList.add("is-open");
+      if (search) {
+        search.focus();
+      }
     });
 
     loadModelCatalog()
       .then(function (catalog) {
         if (activeModelPickerSessionId !== sessionId) return;
-        renderModelPicker(content, sessionId, catalog, currentSelection);
+        renderModelPicker(content, sessionId, catalog, currentSelection, search ? search.value : "");
       })
       .catch(function (err) {
         if (activeModelPickerSessionId !== sessionId) return;
@@ -651,6 +692,7 @@
     modal.setAttribute("aria-hidden", "true");
     document.body.classList.remove("model-modal-open");
     activeModelPickerSessionId = null;
+    activeModelPickerSelection = null;
     if (lastModelPickerTrigger && typeof lastModelPickerTrigger.focus === "function") {
       lastModelPickerTrigger.focus();
     }
@@ -658,6 +700,15 @@
   }
 
   document.addEventListener("click", function (e) {
+    var modeTarget = e.target && e.target.closest ? e.target.closest("[data-action='cycle-mode']") : null;
+    if (modeTarget) {
+      var modeSessionId = modeTarget.getAttribute("data-session-id");
+      if (modeSessionId) {
+        e.preventDefault();
+        cycleMode(modeSessionId);
+        return;
+      }
+    }
     var target = e.target && e.target.closest ? e.target.closest("[data-action='show-model-picker']") : null;
     if (target) {
       var sessionId = target.getAttribute("data-session-id");
@@ -674,8 +725,25 @@
   });
 
   document.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape" && activeModelPickerSessionId) {
       dismissModelPicker();
+      return;
+    }
+    if (e.altKey && e.key === "Tab") {
+      if (activeModelPickerSessionId) return;
+      var detail = document.querySelector('.session-detail[data-session-id]');
+      var sessionId = detail ? detail.getAttribute("data-session-id") : currentSessionId;
+      if (sessionId) {
+        e.preventDefault();
+        cycleMode(sessionId);
+      }
+    }
+  });
+
+  document.addEventListener("input", function (e) {
+    if (e.target && e.target.id === "model-modal-search") {
+      rerenderActiveModelPicker();
     }
   });
 
@@ -703,12 +771,6 @@
         var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
         form.dispatchEvent(submitEvent);
       }
-    }
-    // Shift+Tab cycles permission mode
-    if (event.shiftKey && event.key === 'Tab') {
-      event.preventDefault();
-      var detail = event.target.closest('[data-session-id]');
-      if (detail) cycleMode(detail.getAttribute('data-session-id'));
     }
   };
 
@@ -1168,7 +1230,7 @@
   };
 
   window.cycleMode = function (sessionId) {
-    var indicator = document.querySelector('.mode-stat--interactive');
+    var indicator = document.querySelector('.mode-stat--interactive[data-session-id="' + sessionId + '"]');
     if (!indicator) return;
 
     var currentMode = 'plan';
@@ -1180,7 +1242,7 @@
 
     // Optimistic UI update
     indicator.textContent = MODE_LABELS[nextMode];
-    indicator.title = (MODE_TOOLTIPS[nextMode] || MODE_TOOLTIPS.plan) + ' (shift+tab)';
+    indicator.title = (MODE_TOOLTIPS[nextMode] || MODE_TOOLTIPS.plan) + ' (alt+tab)';
     MODE_ORDER.forEach(function (m) { indicator.classList.remove('mode-stat--' + m); });
     indicator.classList.remove('mode-stat--default');
     indicator.classList.add('mode-stat--' + nextMode);
@@ -1189,18 +1251,19 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: nextMode })
-    }).then(function (res) {
-      if (!res.ok) throw new Error('Mode change failed');
-    }).catch(function () {
+    }).then(async function (res) {
+      if (!res.ok) throw new Error(await readErrorResponse(res));
+    }).catch(function (err) {
       // Rollback optimistic update on failure
       indicator.textContent = MODE_LABELS[currentMode];
-      indicator.title = (MODE_TOOLTIPS[currentMode] || MODE_TOOLTIPS.plan) + ' (shift+tab)';
+      indicator.title = (MODE_TOOLTIPS[currentMode] || MODE_TOOLTIPS.plan) + ' (alt+tab)';
       MODE_ORDER.forEach(function (m) { indicator.classList.remove('mode-stat--' + m); });
       indicator.classList.add('mode-stat--' + currentMode);
+      showNotificationBanner(err instanceof Error ? err.message : 'Mode change failed', 'error');
     });
   };
 
-  // Shift+Tab cycles permission mode — handled in handleMessageKeydown on textarea
+  // Alt+Tab cycles permission mode — handled in handleMessageKeydown and global keydown
 
   // --- Optimistic User Message ---
 
@@ -1369,7 +1432,7 @@
 
   function getStarredRepos() {
     try {
-      var raw = localStorage.getItem("claudesk:starred-repos");
+      var raw = localStorage.getItem(STARRED_REPOS_KEY) || localStorage.getItem(LEGACY_STARRED_REPOS_KEY);
       return raw ? new Set(JSON.parse(raw)) : new Set();
     } catch (e) {
       return new Set();
@@ -1377,7 +1440,7 @@
   }
 
   function saveStarredRepos(set) {
-    localStorage.setItem("claudesk:starred-repos", JSON.stringify(Array.from(set)));
+    localStorage.setItem(STARRED_REPOS_KEY, JSON.stringify(Array.from(set)));
   }
 
   window.toggleStar = function (repoName) {
@@ -1470,3 +1533,7 @@
     }
   }
 })();
+  var NOTIFICATION_PREF_KEY = "maestro-notifications";
+  var LEGACY_NOTIFICATION_PREF_KEY = "claudesk-notifications";
+  var STARRED_REPOS_KEY = "maestro:starred-repos";
+  var LEGACY_STARRED_REPOS_KEY = "claudesk:starred-repos";

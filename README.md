@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="claudesk" width="512"/>
+  <img src="logo.png" alt="maestro" width="512"/>
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
   [![Runtime: Bun](https://img.shields.io/badge/Runtime-Bun-f9f1e1.svg?logo=bun)](https://bun.sh)
@@ -17,7 +17,7 @@
 
 **The pain:** Running coding agents across different repositories means juggling terminals, missing permission prompts, and having no central view of what your agents are doing.
 
-**The solution:** claudesk uses the OpenCode SDK to launch and manage coding agents directly from a web dashboard — start agents, send follow-up prompts, approve permissions, and monitor progress in real time.
+**The solution:** maestro uses the OpenCode SDK to launch and manage coding agents directly from a web dashboard — start agents, send follow-up prompts, approve permissions, and monitor progress in real time.
 
 **The result:** One browser tab to launch, interact with, and control all your coding agents — with live streaming, permission handling, and desktop notifications.
 

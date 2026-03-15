@@ -19,7 +19,7 @@ export function renderLayout(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>claudesk</title>
+  <title>maestro</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/hljs-theme.css">
@@ -33,7 +33,7 @@ export function renderLayout(
     <div hx-trigger="sse:hook-status" hx-swap="none" style="display:none"></div>
     <header class="header">
       <div class="header-left">
-        <span class="logo">claudesk</span>
+        <span class="logo">maestro</span>
       </div>
       <div class="header-right">
         <span class="connection-dot" id="connection-dot" title="SSE Connected"></span>
@@ -77,6 +77,15 @@ export function renderLayout(
       <div class="model-modal-meta">
         <div id="model-modal-session" class="model-modal-session"></div>
         <div id="model-modal-current" class="model-modal-current"></div>
+      </div>
+      <div class="model-modal-toolbar">
+        <input
+          id="model-modal-search"
+          class="model-modal-search"
+          type="search"
+          placeholder="Search models, providers, or IDs"
+          autocomplete="off"
+          spellcheck="false">
       </div>
       <div id="model-modal-content" class="model-modal-content">
         <div class="model-modal-note">Loading models...</div>

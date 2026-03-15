@@ -86,7 +86,7 @@ export function renderEmptyDetail(repoCount = 0): string {
     return `<div class="empty-state">
       <div class="empty-state-icon">&#9673;</div>
       <div class="empty-state-text">No git repos found</div>
-      <div class="empty-state-hint">No git repos found in your configured directory.<br>Run <code>claudesk --setup</code> to reconfigure.</div>
+      <div class="empty-state-hint">No git repos found in your configured directory.<br>Run <code>maestro --setup</code> to reconfigure.</div>
     </div>`;
   }
   return `<div class="empty-state">

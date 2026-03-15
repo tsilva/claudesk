@@ -221,13 +221,18 @@ function friendlyModelName(session: AgentSession): string {
 export function renderSessionStats(session: AgentSession): string {
   const totalTokens = session.inputTokens + session.outputTokens;
   const cost = formatCost(session.totalCostUsd);
+  const currentMode = session.permissionMode === 'default' ? 'plan' : (session.permissionMode || 'plan');
   const modelLabelText = session.model ? friendlyModelName(session) : "";
   const hasMessages = session.messages.length > 0;
+  const modeClass = `stat mode-stat mode-stat--${currentMode} mode-stat--interactive`;
+  const modeAttrs = `data-session-id="${session.id}" data-action="cycle-mode" title="${escapeHtml(modeTooltip(session.permissionMode))} (alt+tab)"`;
   // Model is clickable only before first message is sent
   const modelClass = hasMessages ? "stat" : "stat model-stat--interactive";
   const modelDataAttrs = hasMessages ? "" : `data-session-id="${session.id}" data-action="show-model-picker" data-current-model="${escapeHtml(session.model)}" data-current-provider-id="${escapeHtml(session.modelProviderId || "")}"`;
   const modelTitle = hasMessages ? "" : "Click to change model (before first message)";
   return `<div class="stats-row">
+    <span class="${modeClass}" ${modeAttrs}>${escapeHtml(modeLabel(session.permissionMode))}</span>
+    <span class="stat-sep">·</span>
     <span class="stat" title="OpenCode SDK session">OpenCode</span>
     <span class="stat-sep">·</span>
     <span class="stat">${formatTokens(totalTokens)}</span>

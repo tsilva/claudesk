@@ -334,7 +334,7 @@ app.post("/sessions/:id/focus", async (c) => {
   return c.json({ ok: true, skipped: true });
 });
 
-// Focus the claudesk browser window (via AeroSpace or fallback to open)
+// Focus the maestro browser window (via AeroSpace or fallback to open)
 app.post("/api/focus-dashboard", async (c) => {
   const body = await c.req.json<{ sessionId?: string }>().catch(() => ({}));
   const sessionId = (body as any)?.sessionId;
@@ -359,7 +359,7 @@ app.post("/api/focus-dashboard", async (c) => {
       if (
         appName && windowTitle &&
         BROWSER_APPS.includes(appName.toLowerCase()) &&
-        windowTitle.toLowerCase().includes("claudesk")
+        (windowTitle.toLowerCase().includes("maestro") || windowTitle.toLowerCase().includes("claudesk"))
       ) {
         match = { windowId: windowId?.trim() ?? "", workspace: workspace?.trim() ?? "" };
         break;
@@ -633,7 +633,7 @@ export default {
   fetch: app.fetch,
 };
 
-console.log(`claudesk running at http://localhost:${PORT}`);
+console.log(`maestro running at http://localhost:${PORT}`);
 
 if (!process.argv.includes("--no-open")) {
   const openCmd = process.platform === "win32" ? "start"

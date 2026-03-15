@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "claudesk",
+      "name": "maestro",
       "dependencies": {
         "@opencode-ai/sdk": "^1.2.26",
         "highlight.js": "^11.11.1",

@@ -7,7 +7,8 @@ import type {
   PersistedMessage,
 } from "./types.ts";
 
-const DATA_DIR = join(process.cwd(), ".claudesk", "sessions");
+const DATA_DIR = join(process.cwd(), ".maestro", "sessions");
+const LEGACY_DATA_DIR = join(process.cwd(), ".claudesk", "sessions");
 
 export async function ensureDataDir(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
@@ -56,22 +57,27 @@ export async function saveSession(session: AgentSession): Promise<void> {
 
 export async function loadAllSessions(): Promise<AgentSession[]> {
   const sessions: AgentSession[] = [];
-  let entries: string[];
-  try {
-    entries = await readdir(DATA_DIR);
-  } catch {
-    return sessions;
-  }
+  const seen = new Set<string>();
 
-  for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
+  for (const dir of [DATA_DIR, LEGACY_DATA_DIR]) {
+    let entries: string[];
     try {
-      const filePath = join(DATA_DIR, entry);
-      const file = Bun.file(filePath);
-      const data: PersistedSession = await file.json();
-      sessions.push(deserializeSession(data));
-    } catch (err) {
-      console.warn(`[persistence] skipping corrupt session file: ${entry}`, err);
+      entries = await readdir(dir);
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.endsWith(".json") || seen.has(entry)) continue;
+      try {
+        const filePath = join(dir, entry);
+        const file = Bun.file(filePath);
+        const data: PersistedSession = await file.json();
+        sessions.push(deserializeSession(data));
+        seen.add(entry);
+      } catch (err) {
+        console.warn(`[persistence] skipping corrupt session file: ${entry}`, err);
+      }
     }
   }
 
@@ -79,9 +85,11 @@ export async function loadAllSessions(): Promise<AgentSession[]> {
 }
 
 export async function deleteSessionFile(sessionId: string): Promise<void> {
-  try {
-    await unlink(join(DATA_DIR, `${sessionId}.json`));
-  } catch {
-    // File may not exist yet (session created but never persisted)
+  for (const dir of [DATA_DIR, LEGACY_DATA_DIR]) {
+    try {
+      await unlink(join(dir, `${sessionId}.json`));
+    } catch {
+      // File may not exist yet (session created but never persisted)
+    }
   }
 }

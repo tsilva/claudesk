@@ -144,6 +144,9 @@ export interface SessionDiffEntry {
   file: string;
   additions: number;
   deletions: number;
+  before: string;
+  after: string;
+  status?: string;
 }
 
 export interface AgentSession {

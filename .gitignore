@@ -49,4 +49,5 @@ logs/
 
 # Project-specific rules
 .claudesk/
+.maestro/
 .worktrees/

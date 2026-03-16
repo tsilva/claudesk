@@ -968,6 +968,189 @@ export function renderRawConversation(session: AgentSession, messages: AgentMess
   return lines.join("\n");
 }
 
+type RenderedDiffLine =
+  | { kind: "context" | "add" | "del"; oldNumber?: number; newNumber?: number; text: string }
+  | { kind: "ellipsis"; text: string };
+
+function getDiffStatusLabel(diff: SessionDiffEntry): string {
+  if (diff.status === "added" || (!diff.before && !!diff.after)) return "Added";
+  if (diff.status === "deleted" || (!!diff.before && !diff.after)) return "Deleted";
+  return "Modified";
+}
+
+function splitDiffText(input: string): string[] {
+  if (!input) return [];
+  const normalized = input.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
+function buildDiffLines(beforeText: string, afterText: string): RenderedDiffLine[] {
+  const before = splitDiffText(beforeText);
+  const after = splitDiffText(afterText);
+
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) {
+    prefix++;
+  }
+
+  let beforeSuffix = before.length - 1;
+  let afterSuffix = after.length - 1;
+  while (beforeSuffix >= prefix && afterSuffix >= prefix && before[beforeSuffix] === after[afterSuffix]) {
+    beforeSuffix--;
+    afterSuffix--;
+  }
+
+  const middleBefore = before.slice(prefix, beforeSuffix + 1);
+  const middleAfter = after.slice(prefix, afterSuffix + 1);
+  const matrixCells = middleBefore.length * middleAfter.length;
+  if (matrixCells > 250_000) {
+    return buildFallbackDiffLines(before, after);
+  }
+
+  const lcs = Array.from({ length: middleBefore.length + 1 }, () =>
+    new Array<number>(middleAfter.length + 1).fill(0)
+  );
+
+  for (let i = middleBefore.length - 1; i >= 0; i--) {
+    for (let j = middleAfter.length - 1; j >= 0; j--) {
+      lcs[i]![j] = middleBefore[i] === middleAfter[j]
+        ? 1 + lcs[i + 1]![j + 1]!
+        : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+
+  const lines: RenderedDiffLine[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+
+  for (let i = 0; i < prefix; i++) {
+    lines.push({ kind: "context", oldNumber: oldLine++, newNumber: newLine++, text: before[i]! });
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < middleBefore.length && j < middleAfter.length) {
+    if (middleBefore[i] === middleAfter[j]) {
+      lines.push({ kind: "context", oldNumber: oldLine++, newNumber: newLine++, text: middleBefore[i]! });
+      i++;
+      j++;
+      continue;
+    }
+    if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
+      lines.push({ kind: "del", oldNumber: oldLine++, text: middleBefore[i]! });
+      i++;
+      continue;
+    }
+    lines.push({ kind: "add", newNumber: newLine++, text: middleAfter[j]! });
+    j++;
+  }
+
+  while (i < middleBefore.length) {
+    lines.push({ kind: "del", oldNumber: oldLine++, text: middleBefore[i]! });
+    i++;
+  }
+  while (j < middleAfter.length) {
+    lines.push({ kind: "add", newNumber: newLine++, text: middleAfter[j]! });
+    j++;
+  }
+
+  for (let k = beforeSuffix + 1; k < before.length; k++) {
+    lines.push({ kind: "context", oldNumber: oldLine++, newNumber: newLine++, text: before[k]! });
+  }
+
+  return collapseContextRuns(lines);
+}
+
+function buildFallbackDiffLines(before: string[], after: string[]): RenderedDiffLine[] {
+  const lines: RenderedDiffLine[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+
+  if (before.length > 0) {
+    lines.push({ kind: "ellipsis", text: "Diff too large for inline matching. Showing before/after blocks." });
+    for (const line of before) {
+      lines.push({ kind: "del", oldNumber: oldLine++, text: line });
+    }
+  }
+  if (after.length > 0) {
+    if (before.length === 0) {
+      lines.push({ kind: "ellipsis", text: "New file" });
+    }
+    for (const line of after) {
+      lines.push({ kind: "add", newNumber: newLine++, text: line });
+    }
+  }
+
+  return lines;
+}
+
+function collapseContextRuns(lines: RenderedDiffLine[]): RenderedDiffLine[] {
+  const collapsed: RenderedDiffLine[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (line.kind !== "context") {
+      collapsed.push(line);
+      index++;
+      continue;
+    }
+
+    let end = index;
+    while (end < lines.length && lines[end]!.kind === "context") {
+      end++;
+    }
+
+    const runLength = end - index;
+    if (runLength <= 6) {
+      collapsed.push(...lines.slice(index, end));
+    } else {
+      collapsed.push(...lines.slice(index, index + 3));
+      collapsed.push({ kind: "ellipsis", text: `${runLength - 6} unchanged line${runLength - 6 === 1 ? "" : "s"}` });
+      collapsed.push(...lines.slice(end - 3, end));
+    }
+
+    index = end;
+  }
+
+  return collapsed;
+}
+
+function renderDiffLine(line: RenderedDiffLine): string {
+  if (line.kind === "ellipsis") {
+    return `<div class="diff-line diff-line--ellipsis">
+      <span class="diff-line-num"></span>
+      <span class="diff-line-num"></span>
+      <span class="diff-line-prefix">…</span>
+      <span class="diff-line-text">${escapeHtml(line.text)}</span>
+    </div>`;
+  }
+
+  const prefix = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+  const oldNumber = line.oldNumber ? String(line.oldNumber) : "";
+  const newNumber = line.newNumber ? String(line.newNumber) : "";
+
+  return `<div class="diff-line diff-line--${line.kind}">
+    <span class="diff-line-num">${escapeHtml(oldNumber)}</span>
+    <span class="diff-line-num">${escapeHtml(newNumber)}</span>
+    <span class="diff-line-prefix">${prefix}</span>
+    <span class="diff-line-text">${escapeHtml(line.text) || "&nbsp;"}</span>
+  </div>`;
+}
+
+function renderDiffPatch(diff: SessionDiffEntry): string {
+  const diffLines = buildDiffLines(diff.before, diff.after);
+  if (diffLines.length === 0) {
+    return `<div class="diff-file-empty">No textual changes available.</div>`;
+  }
+
+  return `<div class="diff-file-patch">${diffLines.map(renderDiffLine).join("")}</div>`;
+}
+
 export function renderDiffSummary(diffs: SessionDiffEntry[]): string {
   if (diffs.length === 0) {
     return `<div class="diff-empty-state">
@@ -976,23 +1159,30 @@ export function renderDiffSummary(diffs: SessionDiffEntry[]): string {
     </div>`;
   }
 
-  const totalAdditions = diffs.reduce((sum, diff) => sum + diff.additions, 0);
-  const totalDeletions = diffs.reduce((sum, diff) => sum + diff.deletions, 0);
   const rows = diffs
     .sort((a, b) => a.file.localeCompare(b.file))
-    .map((diff) => `<div class="diff-file-row">
-      <div class="diff-file-path">${escapeHtml(diff.file)}</div>
-      <div class="diff-file-stats">
-        <span class="diff-stat diff-stat--add">+${diff.additions}</span>
-        <span class="diff-stat diff-stat--del">-${diff.deletions}</span>
-      </div>
-    </div>`)
+    .map((diff) => `<details class="diff-file-details">
+      <summary class="diff-file-row">
+        <div class="diff-file-summary-main">
+          <div class="diff-file-path">${escapeHtml(diff.file)}</div>
+          <div class="diff-file-meta">${escapeHtml(getDiffStatusLabel(diff))}</div>
+        </div>
+        <div class="diff-file-summary-side">
+          <div class="diff-file-stats">
+            <span class="diff-stat diff-stat--add">+${diff.additions}</span>
+            <span class="diff-stat diff-stat--del">-${diff.deletions}</span>
+          </div>
+          <span class="diff-file-chevron" aria-hidden="true">⌄</span>
+        </div>
+      </summary>
+      ${renderDiffPatch(diff)}
+    </details>`)
     .join("");
 
   return `<div class="diff-summary-view">
     <div class="diff-summary-header">
       <div class="diff-summary-title">Changed Files</div>
-      <div class="diff-summary-meta">${diffs.length} file${diffs.length !== 1 ? "s" : ""} · <span class="diff-stat diff-stat--add">+${totalAdditions}</span> <span class="diff-stat diff-stat--del">-${totalDeletions}</span></div>
+      <div class="diff-summary-meta">${diffs.length} file${diffs.length !== 1 ? "s" : ""}</div>
     </div>
     <div class="diff-file-list">${rows}</div>
   </div>`;

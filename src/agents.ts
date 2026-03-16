@@ -761,11 +761,14 @@ export class AgentManager {
         responseStyle: "data",
         throwOnError: true,
       });
-      const diffs = this.unwrapData(diffResponse) as OpenCodeFileDiff[];
+      const diffs = this.unwrapData(diffResponse) as Array<OpenCodeFileDiff & { status?: string }>;
       return diffs.map((diff) => ({
         file: diff.file,
         additions: diff.additions,
         deletions: diff.deletions,
+        before: diff.before,
+        after: diff.after,
+        status: diff.status,
       }));
     } catch (err) {
       console.warn(`[opencode] failed to load session diff for ${sessionId}:`, err);

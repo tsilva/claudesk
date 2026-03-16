@@ -75,7 +75,6 @@ export function renderLayout(
         <button type="button" class="model-modal-close" data-action="dismiss-model-modal" aria-label="Close model selector">×</button>
       </div>
       <div class="model-modal-meta">
-        <div id="model-modal-session" class="model-modal-session"></div>
         <div id="model-modal-current" class="model-modal-current"></div>
       </div>
       <div class="model-modal-toolbar">

@@ -3,6 +3,7 @@ import {
   createOpencodeServer,
   type AssistantMessage as OpenCodeAssistantMessage,
   type Event as OpenCodeEvent,
+  type FileDiff as OpenCodeFileDiff,
   type GlobalEvent as OpenCodeGlobalEvent,
   type OpencodeClient,
   type Part as OpenCodePart,
@@ -17,9 +18,10 @@ import type {
   ContentBlock,
   LaunchableRepo,
   RepoGitStatus,
-  PendingPermission,
-  PermissionMode,
-} from "./types.ts";
+    PendingPermission,
+    PermissionMode,
+    SessionDiffEntry,
+  } from "./types.ts";
 import {
   ensureDataDir,
   saveSession,
@@ -49,6 +51,7 @@ type ModelOption = {
   label: string;
   description: string;
   providerId?: string;
+  providerName?: string;
 };
 
 // --- Git Helpers ---
@@ -744,6 +747,32 @@ export class AgentManager {
     return session.messages.slice(-count);
   }
 
+  async getSessionDiff(sessionId: string): Promise<SessionDiffEntry[]> {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.sdkSessionId) {
+      return [];
+    }
+
+    try {
+      const runtime = await this.ensureOpencodeRuntime();
+      const diffResponse = await runtime.client.session.diff({
+        path: { id: session.sdkSessionId },
+        query: { directory: session.cwd },
+        responseStyle: "data",
+        throwOnError: true,
+      });
+      const diffs = this.unwrapData(diffResponse) as OpenCodeFileDiff[];
+      return diffs.map((diff) => ({
+        file: diff.file,
+        additions: diff.additions,
+        deletions: diff.deletions,
+      }));
+    } catch (err) {
+      console.warn(`[opencode] failed to load session diff for ${sessionId}:`, err);
+      return [];
+    }
+  }
+
   async getAvailableModels(): Promise<{ opencode: ModelOption[]; opencodeError?: string }> {
     const result: { opencode: ModelOption[]; opencodeError?: string } = {
       opencode: [],
@@ -773,8 +802,9 @@ export class AgentManager {
       for (const model of models) {
         options.push({
           providerId: provider.id,
+          providerName: provider.name,
           model: model.id,
-          label: `${provider.name} / ${model.name}`,
+          label: model.name,
           description: `OpenCode via ${provider.name}`,
         });
       }

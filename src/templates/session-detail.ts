@@ -1,7 +1,12 @@
-import type { AgentSession, AgentMessage } from "../types.ts";
-import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, renderRawConversation } from "./components.ts";
+import type { AgentSession, AgentMessage, SessionDiffEntry, SessionViewMode } from "../types.ts";
+import { escapeHtml, renderSessionHeaderStatus, renderSessionStats, renderMessage, renderTurnCompleteFooter, renderRawConversation, renderDiffSummary } from "./components.ts";
 
-export function renderSessionDetail(session: AgentSession, messages: AgentMessage[] = [], isRawMode: boolean = false): string {
+export function renderSessionDetail(
+  session: AgentSession,
+  messages: AgentMessage[] = [],
+  viewMode: SessionViewMode = "normal",
+  diffs: SessionDiffEntry[] = [],
+): string {
   // Find the most recent non-error result message to fold into last assistant message
   const resultMsg = messages.findLast((msg) => msg.type === "result" && !msg.isError);
   const footerHtml = resultMsg ? renderTurnCompleteFooter(resultMsg) : "";
@@ -26,16 +31,20 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
     .filter(Boolean)
     .join("\n");
 
-  const rawModeClass = isRawMode ? " raw-mode-active" : "";
+  const viewModeClass = viewMode === "raw"
+    ? " raw-mode-active"
+    : viewMode === "diff"
+      ? " diff-mode-active"
+      : "";
 
-  if (isRawMode) {
+  if (viewMode === "raw") {
     const rawText = renderRawConversation(session, messages);
-    return `<div class="session-detail${rawModeClass}" data-session-id="${session.id}">
+    return `<div class="session-detail${viewModeClass}" data-session-id="${session.id}" data-view-mode="${viewMode}">
       <div class="session-header">
         <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
         <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
         <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
-          ${renderSessionHeaderStatus(session, true)}
+          ${renderSessionHeaderStatus(session, viewMode)}
         </div>
       </div>
       <div class="raw-conversation-view" id="raw-conversation-view">
@@ -44,15 +53,33 @@ export function renderSessionDetail(session: AgentSession, messages: AgentMessag
       <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
         ${renderSessionStats(session)}
       </div>
+      </div>`;
+  }
+
+  if (viewMode === "diff") {
+    return `<div class="session-detail${viewModeClass}" data-session-id="${session.id}" data-view-mode="${viewMode}">
+      <div class="session-header">
+        <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
+        <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
+        <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
+          ${renderSessionHeaderStatus(session, viewMode)}
+        </div>
+      </div>
+      <div class="diff-view" id="diff-view">
+        ${renderDiffSummary(diffs)}
+      </div>
+      <div class="session-footer" id="session-stats" sse-swap="session-stats" hx-swap="innerHTML">
+        ${renderSessionStats(session)}
+      </div>
     </div>`;
   }
 
-  return `<div class="session-detail${rawModeClass}" data-session-id="${session.id}">
+  return `<div class="session-detail${viewModeClass}" data-session-id="${session.id}" data-view-mode="${viewMode}">
     <div class="session-header">
       <span class="session-header-repo">${escapeHtml(session.repoName)}</span>
       <span class="session-header-slug">${escapeHtml(session.id.slice(0, 8))}</span>
       <div id="session-header-status" sse-swap="session-status" hx-swap="innerHTML">
-        ${renderSessionHeaderStatus(session, false)}
+        ${renderSessionHeaderStatus(session, viewMode)}
       </div>
     </div>
     <div class="conversation-stream" id="conversation-stream" sse-swap="stream-append" hx-swap="beforeend">

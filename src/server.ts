@@ -4,7 +4,7 @@ import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { stat } from "fs/promises";
 import { AgentManager } from "./agents.ts";
-import type { AgentSession, AgentMessage } from "./types.ts";
+import type { AgentSession, AgentMessage, SessionViewMode } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
 import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
@@ -168,6 +168,19 @@ const agentManager = new AgentManager(
   }
 );
 
+function getRequestedViewMode(mode?: string): SessionViewMode {
+  if (mode === "raw" || mode === "diff") return mode;
+  return "normal";
+}
+
+async function renderSessionDetailForMode(sessionId: string, mode: SessionViewMode) {
+  const session = agentManager.getSession(sessionId);
+  if (!session) return null;
+  const messages = agentManager.getRecentMessages(sessionId);
+  const diffs = mode === "diff" ? await agentManager.getSessionDiff(sessionId) : [];
+  return renderSessionDetail(session, messages, mode, diffs);
+}
+
 // --- Hono App ---
 
 const app = new Hono();
@@ -291,13 +304,13 @@ app.get("/events", (c) => {
 // Session detail fragment (HTMX swap)
 app.get("/sessions/:id/detail", async (c) => {
   const id = c.req.param("id");
-  const session = agentManager.getSession(id);
-  if (!session) {
+  const mode = getRequestedViewMode(c.req.query("mode"));
+  const detailHtml = await renderSessionDetailForMode(id, mode);
+  if (!detailHtml) {
     const repoCount = agentManager.getLaunchableRepos().length;
     return c.html(renderEmptyDetail(repoCount));
   }
-  const messages = agentManager.getRecentMessages(id);
-  return c.html(renderSessionDetail(session, messages));
+  return c.html(detailHtml);
 });
 
 // Raw conversation text
@@ -609,18 +622,28 @@ app.post("/api/repos/refresh", async (c) => {
   return c.json({ ok: true });
 });
 
-// Toggle raw mode - returns the session detail with raw mode enabled/disabled
-app.get("/sessions/:id/raw-toggle", async (c) => {
+// Toggle pane view - returns the session detail in normal/raw/diff mode
+app.get("/sessions/:id/view", async (c) => {
   const id = c.req.param("id");
-  const session = agentManager.getSession(id);
-  if (!session) {
+  const mode = getRequestedViewMode(c.req.query("mode"));
+  const detailHtml = await renderSessionDetailForMode(id, mode);
+  if (!detailHtml) {
     const repoCount = agentManager.getLaunchableRepos().length;
     return c.html(renderEmptyDetail(repoCount));
   }
-  const messages = agentManager.getRecentMessages(id);
-  // Check if currently in raw mode by looking at query param
-  const isRawMode = c.req.query("mode") === "raw";
-  return c.html(renderSessionDetail(session, messages, isRawMode));
+  return c.html(detailHtml);
+});
+
+// Backward-compatible raw toggle route
+app.get("/sessions/:id/raw-toggle", async (c) => {
+  const id = c.req.param("id");
+  const mode = getRequestedViewMode(c.req.query("mode"));
+  const detailHtml = await renderSessionDetailForMode(id, mode);
+  if (!detailHtml) {
+    const repoCount = agentManager.getLaunchableRepos().length;
+    return c.html(renderEmptyDetail(repoCount));
+  }
+  return c.html(detailHtml);
 });
 
 // --- Start ---

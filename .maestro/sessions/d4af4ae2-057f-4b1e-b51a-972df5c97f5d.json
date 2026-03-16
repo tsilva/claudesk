@@ -1,0 +1,20 @@
+{
+  "id": "d4af4ae2-057f-4b1e-b51a-972df5c97f5d",
+  "backend": "opencode",
+  "sdkSessionId": "",
+  "repoName": "claudesk",
+  "cwd": "/Users/tsilva/repos/tsilva/claudesk",
+  "status": "idle",
+  "lastMessagePreview": "",
+  "gitBranch": "",
+  "totalCostUsd": 0,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "turnCount": 0,
+  "model": "anthropic/claude-3.5-haiku",
+  "modelProviderId": "openrouter",
+  "permissionMode": "plan",
+  "lastActivity": "2026-03-16T14:46:30.338Z",
+  "createdAt": "2026-03-16T14:46:30.338Z",
+  "messages": []
+}

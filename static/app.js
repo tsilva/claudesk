@@ -7,6 +7,7 @@
   let currentSessionId = null;
   var pendingAnswers = {}; // { toolUseId: { questionText: selectedLabel(s) } }
   var seenNotifications = new Set(); // tracks "event:sessionId" keys to suppress replayed notifications
+  var sessionDrafts = {}; // { sessionId: draftText }
   var isUserScrolling = false;
   var scrollTimeout = null;
   var isProgrammaticScroll = false;
@@ -46,6 +47,38 @@
       banner.classList.remove("notification--success", "notification--warning", "notification--error");
       notificationBannerTimer = null;
     }, timeoutMs || 5000);
+  }
+
+  function getSessionDetailElement() {
+    return document.querySelector(".session-detail[data-session-id]");
+  }
+
+  function saveSessionDraft(sessionId, text) {
+    if (!sessionId) return;
+    if (text) {
+      sessionDrafts[sessionId] = text;
+      return;
+    }
+    delete sessionDrafts[sessionId];
+  }
+
+  function saveVisibleSessionDraft() {
+    var detail = getSessionDetailElement();
+    if (!detail) return;
+    var sessionId = detail.getAttribute("data-session-id");
+    var input = detail.querySelector(".message-input");
+    if (!sessionId || !input) return;
+    saveSessionDraft(sessionId, input.value);
+  }
+
+  function restoreSessionDraft(sessionId) {
+    if (!sessionId || !Object.prototype.hasOwnProperty.call(sessionDrafts, sessionId)) return;
+    var input = document.querySelector('.session-detail[data-session-id="' + sessionId + '"] .message-input');
+    if (!input) return;
+    input.value = sessionDrafts[sessionId];
+    if (!input.disabled) {
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
   }
 
   async function readErrorResponse(res) {
@@ -279,6 +312,12 @@
     if (e.target && e.target.id === "sidebar-filter-input") {
       filterSidebar(e.target.value);
     }
+    if (e.target && e.target.classList && e.target.classList.contains("message-input")) {
+      var detail = e.target.closest(".session-detail[data-session-id]");
+      if (detail) {
+        saveSessionDraft(detail.getAttribute("data-session-id"), e.target.value);
+      }
+    }
   });
 
   function reapplyFilter() {
@@ -362,6 +401,12 @@
       if (window.htmx) {
         window.htmx.process(e.detail.target);
       }
+      syncSessionHeaderViewMode();
+      var detail = getSessionDetailElement();
+      var sessionId = detail ? detail.getAttribute("data-session-id") : "";
+      if (sessionId) {
+        restoreSessionDraft(sessionId);
+      }
       var container = document.getElementById("conversation-stream");
       if (container) {
         scrollToNewest(container);
@@ -385,6 +430,10 @@
       }
     }
 
+    if (e.detail.target && e.detail.target.id === "session-header-status") {
+      syncSessionHeaderViewMode();
+    }
+
   });
 
   // --- Session Dismiss ---
@@ -392,6 +441,7 @@
   window.dismissSession = function (sessionId) {
     fetch("/sessions/" + sessionId, { method: "DELETE" })
       .then(function () {
+        delete sessionDrafts[sessionId];
         if (sessionId === currentSessionId) {
           currentSessionId = null;
           var detail = document.getElementById("session-detail");
@@ -409,6 +459,7 @@
 
   window.switchSession = function (sessionId, opts) {
     if (sessionId === currentSessionId) return;
+    saveVisibleSessionDraft();
     currentSessionId = sessionId;
     pendingAnswers = {};
     isUserScrolling = false;
@@ -497,12 +548,32 @@
     return document.getElementById("model-modal-search");
   }
 
-  function getModelModalSessionText(sessionId) {
-    var detail = document.querySelector('.session-detail[data-session-id="' + sessionId + '"]');
-    if (!detail) return "New session";
-    var repo = detail.querySelector(".session-header-repo");
-    var slug = detail.querySelector(".session-header-slug");
-    return (repo ? repo.textContent.trim() : "Session") + (slug ? " · " + slug.textContent.trim() : "");
+  function humanizeProviderId(providerId) {
+    if (!providerId) return "Default";
+    return providerId
+      .split(/[-_]/g)
+      .filter(Boolean)
+      .map(function (part) { return part.charAt(0).toUpperCase() + part.slice(1); })
+      .join(" ");
+  }
+
+  function formatCurrentModelSelection(currentSelection, catalog) {
+    if (!currentSelection || !currentSelection.model) {
+      return "Current: Default OpenCode model";
+    }
+    var matchedModel = null;
+    if (catalog && catalog.opencode) {
+      matchedModel = catalog.opencode.find(function (model) {
+        return model.model === currentSelection.model
+          && (model.providerId || "") === (currentSelection.providerId || "");
+      }) || null;
+    }
+    var providerName = matchedModel && matchedModel.providerName
+      ? matchedModel.providerName
+      : humanizeProviderId(currentSelection.providerId);
+    var route = currentSelection.providerId || "default";
+    var modelLabel = matchedModel && matchedModel.label ? matchedModel.label : currentSelection.model;
+    return "Current: " + modelLabel + " · " + providerName + " · " + route;
   }
 
   function getCurrentModelSelection(trigger) {
@@ -514,16 +585,10 @@
     };
   }
 
-  function setModelModalMeta(sessionId, currentSelection) {
-    var sessionEl = document.getElementById("model-modal-session");
+  function setModelModalMeta(currentSelection, catalog) {
     var currentEl = document.getElementById("model-modal-current");
-    if (sessionEl) {
-      sessionEl.textContent = getModelModalSessionText(sessionId);
-    }
     if (currentEl) {
-      currentEl.textContent = currentSelection.label
-        ? "Current: " + currentSelection.label
-        : "Current: Default OpenCode model";
+      currentEl.textContent = formatCurrentModelSelection(currentSelection, catalog);
     }
   }
 
@@ -563,13 +628,9 @@
     if (isSelected) {
       opt.classList.add("is-selected");
     }
-    var providerHtml = model.providerId
-      ? '<span class="model-picker-provider">' + escapeHtmlClient(model.providerId) + '</span>'
-      : "";
     opt.innerHTML =
       '<span class="model-picker-topline">' +
         '<span class="model-picker-label">' + escapeHtmlClient(model.label) + '</span>' +
-        providerHtml +
       '</span>' +
       '<span class="model-picker-desc">' + escapeHtmlClient(model.description) + '</span>';
     opt.onclick = function (e) {
@@ -584,11 +645,31 @@
     if (!query) return true;
     var haystack = [
       model.label,
+      model.providerName || "",
       model.description,
       model.providerId || "",
       model.model || ""
     ].join(" ").toLowerCase();
     return haystack.indexOf(query) >= 0;
+  }
+
+  function groupModelsByProvider(models) {
+    var groups = new Map();
+    models.forEach(function (model) {
+      var providerKey = model.providerId || "other";
+      var group = groups.get(providerKey);
+      if (!group) {
+        group = {
+          title: model.providerName || model.providerId || "Other",
+          models: []
+        };
+        groups.set(providerKey, group);
+      }
+      group.models.push(model);
+    });
+    return Array.from(groups.values()).sort(function (a, b) {
+      return a.title.localeCompare(b.title);
+    });
   }
 
   function appendModelSection(container, title, models, sessionId, currentSelection) {
@@ -615,7 +696,9 @@
     var filteredModels = (catalog.opencode || []).filter(function (model) {
       return matchesModelSearch(model, normalizedQuery);
     });
-    appendModelSection(container, "OpenCode SDK", filteredModels, sessionId, currentSelection);
+    groupModelsByProvider(filteredModels).forEach(function (group) {
+      appendModelSection(container, group.title, group.models, sessionId, currentSelection);
+    });
 
     if (catalog.opencodeError) {
       var note = document.createElement("div");
@@ -657,7 +740,7 @@
     activeModelPickerSessionId = sessionId;
     lastModelPickerTrigger = trigger || null;
     activeModelPickerSelection = currentSelection;
-    setModelModalMeta(sessionId, currentSelection);
+    setModelModalMeta(currentSelection, modelCatalogCache);
     if (search) {
       search.value = "";
     }
@@ -675,6 +758,7 @@
     loadModelCatalog()
       .then(function (catalog) {
         if (activeModelPickerSessionId !== sessionId) return;
+        setModelModalMeta(currentSelection, catalog);
         renderModelPicker(content, sessionId, catalog, currentSelection, search ? search.value : "");
       })
       .catch(function (err) {
@@ -748,6 +832,7 @@
   });
 
   window.updateSessionModel = function (sessionId, model) {
+    saveVisibleSessionDraft();
     postJson("/api/agents/" + sessionId + "/model", {
       model: model.model,
       modelProviderId: model.providerId
@@ -979,6 +1064,7 @@
     })
       .then(async function (res) {
         if (!res.ok) throw new Error(await readErrorResponse(res));
+        saveSessionDraft(sessionId, "");
         if (input) input.value = "";
       })
       .catch(function (err) {
@@ -1201,16 +1287,35 @@
       .catch(function (err) { console.warn("Focus editor failed:", err); });
   };
 
-  // --- Raw Mode Toggle ---
+  // --- Pane View Modes ---
+
+  function getActiveSessionViewMode() {
+    var detail = document.querySelector(".session-detail[data-view-mode]");
+    return detail ? (detail.getAttribute("data-view-mode") || "normal") : "normal";
+  }
+
+  function syncSessionHeaderViewMode() {
+    var detail = document.querySelector(".session-detail[data-view-mode]");
+    if (!detail) return;
+    var activeMode = detail.getAttribute("data-view-mode") || "normal";
+    var rawBtn = detail.querySelector('[data-view-button="raw"]');
+    var diffBtn = detail.querySelector('[data-view-button="diff"]');
+    if (rawBtn) rawBtn.classList.toggle("btn--active", activeMode === "raw");
+    if (diffBtn) diffBtn.classList.toggle("btn--active", activeMode === "diff");
+  }
+
+  function setSessionViewMode(sessionId, nextMode) {
+    htmx.ajax("GET", "/sessions/" + sessionId + "/view?mode=" + nextMode, "#session-detail");
+  }
 
   window.toggleRawMode = function (sessionId) {
-    var detail = document.getElementById("session-detail");
-    if (!detail) return;
+    var mode = getActiveSessionViewMode() === "raw" ? "normal" : "raw";
+    setSessionViewMode(sessionId, mode);
+  };
 
-    var isRawMode = detail.querySelector(".raw-mode-active") !== null;
-    var mode = isRawMode ? "normal" : "raw";
-
-    htmx.ajax("GET", "/sessions/" + sessionId + "/raw-toggle?mode=" + mode, "#session-detail");
+  window.toggleDiffMode = function (sessionId) {
+    var mode = getActiveSessionViewMode() === "diff" ? "normal" : "diff";
+    setSessionViewMode(sessionId, mode);
   };
 
   // --- Permission Mode Cycling ---

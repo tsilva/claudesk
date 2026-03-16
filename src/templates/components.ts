@@ -1,4 +1,4 @@
-import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingQuestion, PermissionMode } from "../types.ts";
+import type { AgentSession, AgentStatus, AgentMessage, ContentBlock, PendingQuestion, PermissionMode, SessionDiffEntry, SessionViewMode } from "../types.ts";
 import { renderMarkdown } from "../markdown.ts";
 
 function truncateJson(input: unknown, limit = 500): string {
@@ -191,7 +191,7 @@ function getToolPreview(toolName: string, toolInput: Record<string, any> | null 
 
 // --- Session Header Status ---
 
-export function renderSessionHeaderStatus(session: AgentSession, isRawMode: boolean = false): string {
+export function renderSessionHeaderStatus(session: AgentSession, viewMode: SessionViewMode = "normal"): string {
   const isActive = session.status === "streaming" || session.status === "starting";
   const timerTs = (isActive && session.turnStartedAt ? session.turnStartedAt : session.lastActivity).toISOString();
   return `${statusBadge(session.status)}
@@ -199,7 +199,8 @@ export function renderSessionHeaderStatus(session: AgentSession, isRawMode: bool
           data-last-activity="${timerTs}"
           data-status="${session.status}"></span>
     <span class="session-header-spacer"></span>
-    <button class="btn btn--ghost ${isRawMode ? 'btn--active' : ''}" onclick="toggleRawMode('${session.id}')" title="Toggle raw mode">${isRawMode ? 'Normal' : 'Raw'}</button>
+    <button class="btn btn--ghost ${viewMode === 'raw' ? 'btn--active' : ''}" data-view-button="raw" onclick="toggleRawMode('${session.id}')" title="Toggle raw transcript">Raw</button>
+    <button class="btn btn--ghost ${viewMode === 'diff' ? 'btn--active' : ''}" data-view-button="diff" onclick="toggleDiffMode('${session.id}')" title="Toggle diff summary">Diff</button>
     <button class="btn btn--ghost" onclick="focusEditor('${session.id}')" title="Open in editor">Editor</button>
     ${isActive ? `<button class="btn btn--ghost" onclick="stopAgent('${session.id}')" title="Stop agent">Stop</button>` : ""}`;
 }
@@ -965,4 +966,34 @@ export function renderRawConversation(session: AgentSession, messages: AgentMess
   }
 
   return lines.join("\n");
+}
+
+export function renderDiffSummary(diffs: SessionDiffEntry[]): string {
+  if (diffs.length === 0) {
+    return `<div class="diff-empty-state">
+      <div class="diff-empty-title">No changed files</div>
+      <div class="diff-empty-hint">Run a task that edits files, then open Diff to see added and removed lines.</div>
+    </div>`;
+  }
+
+  const totalAdditions = diffs.reduce((sum, diff) => sum + diff.additions, 0);
+  const totalDeletions = diffs.reduce((sum, diff) => sum + diff.deletions, 0);
+  const rows = diffs
+    .sort((a, b) => a.file.localeCompare(b.file))
+    .map((diff) => `<div class="diff-file-row">
+      <div class="diff-file-path">${escapeHtml(diff.file)}</div>
+      <div class="diff-file-stats">
+        <span class="diff-stat diff-stat--add">+${diff.additions}</span>
+        <span class="diff-stat diff-stat--del">-${diff.deletions}</span>
+      </div>
+    </div>`)
+    .join("");
+
+  return `<div class="diff-summary-view">
+    <div class="diff-summary-header">
+      <div class="diff-summary-title">Changed Files</div>
+      <div class="diff-summary-meta">${diffs.length} file${diffs.length !== 1 ? "s" : ""} · <span class="diff-stat diff-stat--add">+${totalAdditions}</span> <span class="diff-stat diff-stat--del">-${totalDeletions}</span></div>
+    </div>
+    <div class="diff-file-list">${rows}</div>
+  </div>`;
 }

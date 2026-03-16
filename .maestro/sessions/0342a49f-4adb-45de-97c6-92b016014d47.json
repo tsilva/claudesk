@@ -1,0 +1,20 @@
+{
+  "id": "0342a49f-4adb-45de-97c6-92b016014d47",
+  "backend": "opencode",
+  "sdkSessionId": "",
+  "repoName": "llame",
+  "cwd": "/Users/tsilva/repos/tsilva/llame",
+  "status": "idle",
+  "lastMessagePreview": "",
+  "gitBranch": "",
+  "totalCostUsd": 0,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "turnCount": 0,
+  "model": "kimi-k2.5",
+  "modelProviderId": "opencode",
+  "permissionMode": "plan",
+  "lastActivity": "2026-03-16T14:46:34.064Z",
+  "createdAt": "2026-03-16T14:46:34.064Z",
+  "messages": []
+}

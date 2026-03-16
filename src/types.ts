@@ -138,6 +138,14 @@ export type PermissionUpdate =
   | { type: 'addDirectories'; directories: string[]; destination: PermissionUpdateDestination }
   | { type: 'removeDirectories'; directories: string[]; destination: PermissionUpdateDestination };
 
+export type SessionViewMode = "normal" | "raw" | "diff";
+
+export interface SessionDiffEntry {
+  file: string;
+  additions: number;
+  deletions: number;
+}
+
 export interface AgentSession {
   id: string;
   backend: AgentBackend;

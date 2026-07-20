@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { stat } from "fs/promises";
+import { createServer } from "node:net";
 import { AgentManager } from "./agents.ts";
 import type { AgentSession, AgentMessage, SessionViewMode } from "./types.ts";
 import { renderLayout } from "./templates/layout.ts";
@@ -10,7 +11,50 @@ import { renderSidebar } from "./templates/sidebar.ts";
 import { renderSessionDetail, renderEmptyDetail } from "./templates/session-detail.ts";
 import { renderMessage, renderSessionStats, renderSessionHeaderStatus, renderTurnCompleteFooter, renderRawConversation } from "./templates/components.ts";
 
-const PORT = parseInt(process.env.CLAUDESK_PORT || process.env.PORT || "3456", 10);
+async function randomAvailablePort() {
+  const server = createServer();
+
+  return await new Promise<number>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        if (!address || typeof address === "string") {
+          reject(new Error("Could not resolve random server port"));
+          return;
+        }
+
+        resolve(address.port);
+      });
+    });
+  });
+}
+
+function readRequestedPort() {
+  const args = process.argv.slice(2);
+  const portArgIndex = args.findIndex((arg) => arg === "--port" || arg === "-p");
+  const argPort = portArgIndex === -1 ? undefined : args[portArgIndex + 1];
+  const inlinePort = args.find((arg) => arg.startsWith("--port=") || arg.startsWith("-p="));
+  return argPort ?? inlinePort?.split("=")[1] ?? process.env.CLAUDESK_PORT ?? process.env.PORT ?? "3456";
+}
+
+async function resolvePort() {
+  const requestedPort = readRequestedPort();
+  const port = requestedPort === "auto" ? await randomAvailablePort() : Number.parseInt(requestedPort, 10);
+
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid port: ${requestedPort}`);
+  }
+
+  return port;
+}
+
+const PORT = await resolvePort();
 
 // --- SSE Client Tracking ---
 
